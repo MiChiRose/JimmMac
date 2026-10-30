@@ -1,0 +1,14 @@
+# Local build products and macOS metadata
+build/
+build-update/
+*.dSYM/
+.DS_Store
+
+# Runtime account data and temporary keychains
+accounts/
+history.json
+drafts.json
+network-diagnostics.json
+*.keychain
+*.keychain-db
+*.log
