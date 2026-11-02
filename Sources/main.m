@@ -1,14 +1,15 @@
 #import <Cocoa/Cocoa.h>
 #import "JMAppDelegate.h"
 #import "JMProtocol.h"
+#import "JMKeyboard.h"
+#import "JMHTTPClient.h"
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         BOOL profileProbe=argc>1 && strcmp(argv[1],"--probe-profile")==0;
         if (argc > 1 && (strcmp(argv[1], "--probe-network") == 0 || profileProbe)) {
             // Check the actual routes/methods without a real token or session.
             __block int result = 0;
-            NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-            NSURLSession *session = [NSURLSession sessionWithConfiguration:config delegate:nil delegateQueue:[NSOperationQueue mainQueue]];
+            JMHTTPClient *session=[[JMHTTPClient alloc] initWithProtocolClasses:nil legacy:argc>2 && strcmp(argv[2],"--legacy")==0];
             NSArray *profileRoutes=@[@"/presence/setProfile",@"/presence/setStatus",@"/memberDir/get",@"/memberDir/update",@"/expressions/upload"];
             NSArray *routes=profileProbe ? profileRoutes : [@[@"/auth/getInfo", @"/aim/fetchEvents", @"/aim/endSession", @"/buddylist/addBuddy", @"/presence/get", @"/presence/getProfile", @"/presence/setState", @"/im/setTyping", @"/buddylist/setBuddyAttribute", @"/buddylist/removeBuddy", @"/buddylist/moveBuddy", @"/buddylist/addGroup", @"/buddylist/renameGroup", @"/buddylist/removeGroup"] arrayByAddingObjectsFromArray:profileRoutes];
             for (NSString *path in routes) {
@@ -40,7 +41,7 @@ int main(int argc, const char *argv[]) {
             }
             [session invalidateAndCancel]; return result;
         }
-        NSApplication *app = [NSApplication sharedApplication];
+        NSApplication *app = [JMApplication sharedApplication];
         [app setActivationPolicy:NSApplicationActivationPolicyRegular];
         JMAppDelegate *delegate = [[JMAppDelegate alloc] init]; [app setDelegate:delegate];
         [app run];

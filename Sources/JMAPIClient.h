@@ -12,7 +12,7 @@
 - (void)client:(JMAPIClient *)client authenticatedWithToken:(NSString *)token expiresAt:(NSDate *)expiration;
 @end
 
-@interface JMAPIClient : NSObject <NSURLSessionTaskDelegate>
+@interface JMAPIClient : NSObject
 @property(nonatomic, weak) id<JMAPIClientDelegate> delegate;
 @property(nonatomic, readonly) BOOL connected;
 @property(nonatomic, copy, readonly) NSString *uin;

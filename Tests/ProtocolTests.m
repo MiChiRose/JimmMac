@@ -2,6 +2,7 @@
 #import "JMProtocol.h"
 #import "JMHistory.h"
 #import "JMAPIClient.h"
+#import "JMHTTPClient.h"
 #import "JMTextTools.h"
 #import "JMDraftStore.h"
 #import "JMLoginStore.h"
@@ -138,11 +139,9 @@ static NSUInteger CountRequests(NSString *suffix) { NSUInteger count=0; for (NSU
 @end
 @implementation FixtureClient
 - (NSURL *)baseURL { return [NSURL URLWithString:@"https://fixture.invalid/webapi"]; }
-- (NSURLSessionConfiguration *)sessionConfiguration {
-    NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-    config.protocolClasses = @[[FixtureProtocol class]];
-    return config;
-}
+- (NSArray *)protocolClasses { return @[[FixtureProtocol class]]; }
+- (BOOL)useLegacyTransport { return getenv("JIMMMAC_TEST_LEGACY_TRANSPORT")!=NULL; }
+
 @end
 @interface FixtureDelegate : NSObject <JMAPIClientDelegate>
 @property BOOL online;
@@ -168,7 +167,7 @@ static NSUInteger CountRequests(NSString *suffix) { NSUInteger count=0; for (NSU
 - (void)client:(JMAPIClient *)client authenticatedWithToken:(NSString *)token expiresAt:(NSDate *)expiration { self.authenticatedTokens++; self.longTermExpiration=expiration.timeIntervalSinceNow>300*86400; }
 @end
 @interface JMAPIClient (TransportTest)
-- (NSURLSessionDataTask *)call:(NSString *)path parameters:(NSDictionary *)parameters timeout:(NSTimeInterval)timeout completion:(void (^)(NSDictionary *, NSError *))completion;
+- (JMHTTPTask *)call:(NSString *)path parameters:(NSDictionary *)parameters timeout:(NSTimeInterval)timeout completion:(void (^)(NSDictionary *, NSError *))completion;
 @end
 
 int main(void) {
@@ -281,7 +280,7 @@ int main(void) {
             @{@"type":@"myInfo",@"seqNum":@11,@"eventData":@{@"aimId":@"111",@"friendly":@"My Name",@"state":@"online"}}], @"lastSeqNum":@11, @"timeToNextFetch":@1};
         FixtureClient *client = [[FixtureClient alloc] init]; FixtureDelegate *delegate = [[FixtureDelegate alloc] init]; client.delegate = delegate;
         [client loginWithUIN:@"111" password:@"fixture-only"]; Pump(0.8);
-        Check(delegate.online && delegate.buddyCount == 1, @"NSURLSession login → startSession → contacts integration");
+        Check(delegate.online && delegate.buddyCount == 1, @"transport login → startSession → contacts integration");
         Check(delegate.messageCount == 2 && delegate.presenceCount == 1, @"long polling delivers offline, presence and sentIM events");
         NSString *lastForm = [forms lastObject];
         Check([lastForm rangeOfString:@"seqNum=11"].location != NSNotFound, @"next poll advances sequence after processing events");
@@ -441,7 +440,7 @@ int main(void) {
         [client resumeWithUIN:@"111" token:@"fixture-token"]; [client disconnect]; Pump(0.3);
         Check(!client.connected,@"cancelled saved-token verification cannot revive a disconnected session");
         [NSURLProtocol unregisterClass:[FixtureProtocol class]];
-        printf("PASS: %lu checks\n", (unsigned long)checks);
+        printf("PASS: %lu checks (%s transport)\n", (unsigned long)checks,getenv("JIMMMAC_TEST_LEGACY_TRANSPORT") ? "10.8 NSURLConnection" : "NSURLSession");
     }
     return 0;
 }

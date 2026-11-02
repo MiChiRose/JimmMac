@@ -1,6 +1,8 @@
 # Local build products and macOS metadata
 build/
 build-update/
+build-compat/
+build-verify/
 *.dSYM/
 .DS_Store
 
@@ -12,3 +14,5 @@ network-diagnostics.json
 *.keychain
 *.keychain-db
 *.log
+
+dist/

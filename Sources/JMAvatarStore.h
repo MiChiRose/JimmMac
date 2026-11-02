@@ -5,7 +5,7 @@ NSData *JMPrepareAvatar(NSData *data, NSError **error);
 @protocol JMAvatarStoreDelegate <NSObject>
 - (void)avatarStore:(JMAvatarStore *)store updatedUIN:(NSString *)uin;
 @end
-@interface JMAvatarStore : NSObject <NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
+@interface JMAvatarStore : NSObject
 @property(nonatomic, weak) id<JMAvatarStoreDelegate> delegate;
 - (NSImage *)imageForUIN:(NSString *)uin;
 - (void)refreshUIN:(NSString *)uin;

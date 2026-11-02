@@ -1,10 +1,11 @@
 #import "JMAPIClient.h"
 #import "JMProtocol.h"
+#import "JMHTTPClient.h"
 #import <math.h>
 
 @interface JMAPIClient ()
-@property(nonatomic, strong) NSURLSession *network;
-@property(nonatomic, strong) NSURLSessionDataTask *pollTask;
+@property(nonatomic, strong) JMHTTPClient *network;
+@property(nonatomic, strong) JMHTTPTask *pollTask;
 @property(nonatomic, copy) NSString *token;
 @property(nonatomic, strong) NSDate *tokenExpiration;
 @property(nonatomic) BOOL deliverLoginToken;
@@ -26,7 +27,9 @@
 
 @implementation JMAPIClient
 - (NSURL *)baseURL { return [NSURL URLWithString:@"https://jimm.online/webapi"]; }
-- (NSURLSessionConfiguration *)sessionConfiguration { return [NSURLSessionConfiguration ephemeralSessionConfiguration]; }
+- (NSArray *)protocolClasses { return nil; }
+- (BOOL)useLegacyTransport { return NO; }
+- (JMHTTPClient *)makeNetwork { return [[JMHTTPClient alloc] initWithProtocolClasses:[self protocolClasses] legacy:[self useLegacyTransport]]; }
 - (void)status:(NSString *)text connected:(BOOL)connected {
     self.connected = connected;
     [self.delegate client:self changedStatus:text connected:connected];
@@ -41,7 +44,7 @@
     // UIN, token, session ID, messages or NSError's userInfo.
     [self.diagnosticEntries addObject:@{@"endpoint":path, @"http":@(http), @"api":@(api),
         @"errorDomain":error.domain ?: @"", @"errorCode":@(error.code),
-        @"version":@"0.11.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
+        @"version":@"0.12.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
     if ([self.diagnosticEntries count] > 20) [self.diagnosticEntries removeObjectAtIndex:0];
     NSURL *root = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
     NSURL *directory = [root URLByAppendingPathComponent:@"JimmMac" isDirectory:YES];
@@ -51,13 +54,13 @@
     if ([safeData writeToURL:file options:NSDataWritingAtomic error:NULL])
         [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions:@0600} ofItemAtPath:[file path] error:NULL];
 }
-- (NSURLSessionDataTask *)call:(NSString *)path parameters:(NSDictionary *)parameters timeout:(NSTimeInterval)timeout
+- (JMHTTPTask *)call:(NSString *)path parameters:(NSDictionary *)parameters timeout:(NSTimeInterval)timeout
                   completion:(void (^)(NSDictionary *, NSError *))completion {
     return [self performRequest:JMRequest([self baseURL],path,parameters,timeout) path:path completion:completion];
 }
-- (NSURLSessionDataTask *)performRequest:(NSURLRequest *)request path:(NSString *)path completion:(void (^)(NSDictionary *, NSError *))completion {
+- (JMHTTPTask *)performRequest:(NSURLRequest *)request path:(NSString *)path completion:(void (^)(NSDictionary *, NSError *))completion {
     NSUInteger generation = self.generation;
-    NSURLSessionDataTask *task = [self.network dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *transportError) {
+    JMHTTPTask *task = [self.network dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *transportError) {
         if (generation != self.generation) return;
         NSError *error = transportError;
         BOOL emptyTypingOK = [path isEqualToString:@"/im/setTyping"] && ![data length] && [response isKindOfClass:[NSHTTPURLResponse class]] && [(NSHTTPURLResponse *)response statusCode] == 200;
@@ -75,12 +78,7 @@
     self.typingLastSent = [NSMutableDictionary dictionary]; self.typingPending = [NSMutableDictionary dictionary]; self.typingScheduled = [NSMutableSet set];
     self.preferredPresence=nil;
     self.sequence = 0; self.failures = 0;
-    NSURLSessionConfiguration *config = [self sessionConfiguration];
-    config.timeoutIntervalForRequest = 75;
-    config.timeoutIntervalForResource = 90;
-    config.HTTPMaximumConnectionsPerHost = 4;
-    config.URLCache = nil; config.HTTPCookieStorage = nil; config.URLCredentialStorage = nil;
-    self.network = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:[NSOperationQueue mainQueue]];
+    self.network=[self makeNetwork];
 }
 - (void)loginWithUIN:(NSString *)uin password:(NSString *)password { [self loginWithUIN:uin password:password longTerm:NO]; }
 - (void)loginWithUIN:(NSString *)uin password:(NSString *)password longTerm:(BOOL)longTerm {
@@ -124,7 +122,7 @@
     NSUInteger attempt = ++self.sessionSerial;
     [self status:@"Подключаемся к Jimm.online…" connected:NO];
     [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,sessionEnded,rateLimit",
-                                              @"clientName":@"JimmMac Mavericks", @"clientVersion":@"0.11.0", @"timeout":@"60"}
+                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.12.0", @"timeout":@"60"}
            timeout:30 completion:^(NSDictionary *data, NSError *error) {
         if (attempt != self.sessionSerial) return;
         if (error) {
@@ -413,15 +411,10 @@
     self.network = nil; self.pollTask = nil; self.token = nil; self.tokenExpiration=nil; self.deliverLoginToken=NO; self.sessionID = nil; self.connected = NO;
     if ([sid length]) {
         // Best-effort logout on a separate short-lived connection. No credentials on disk.
-        NSURLSessionConfiguration *config = [self sessionConfiguration];
-        NSURLSession *goodbye = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:[NSOperationQueue mainQueue]];
+        JMHTTPClient *goodbye=[self makeNetwork];
         [[goodbye dataTaskWithRequest:JMRequest([self baseURL], @"/aim/endSession", @{@"aimsid":sid}, 8)
                    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {}] resume];
         [goodbye finishTasksAndInvalidate];
     }
-}
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response
-        newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completionHandler {
-    completionHandler(nil); // Never forward a password, token or message to a redirect destination.
 }
 @end

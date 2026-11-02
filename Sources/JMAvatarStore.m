@@ -1,5 +1,6 @@
 #import "JMAvatarStore.h"
 #import "JMProtocol.h"
+#import "JMHTTPClient.h"
 #import <ImageIO/ImageIO.h>
 static const NSUInteger JMAvatarByteLimit = 1024 * 1024;
 NSData *JMPrepareAvatar(NSData *data, NSError **error) {
@@ -67,22 +68,22 @@ NSImage *JMDecodeAvatar(NSData *data) {
     NSImage *image=[[NSImage alloc] initWithSize:NSMakeSize(width,height)]; [image addRepresentation:rep]; return image;
 }
 @interface JMAvatarStore ()
-@property(nonatomic, strong) NSURLSession *network;
+@property(nonatomic, strong) JMHTTPClient *network;
 @property(nonatomic, strong) NSCache *images;
 @property(nonatomic, strong) NSMutableDictionary *pending;
 @property(nonatomic, strong) NSMutableDictionary *retryAfter;
-@property(nonatomic, strong) NSMutableDictionary *buffers;
 @property(nonatomic, strong) NSURL *cacheDirectory;
 @end
 @implementation JMAvatarStore
 - (id)init {
     self=[super init]; if (!self) return nil;
     self.images=[[NSCache alloc] init]; self.images.countLimit=64; self.images.totalCostLimit=16*1024*1024;
-    self.pending=[NSMutableDictionary dictionary]; self.retryAfter=[NSMutableDictionary dictionary]; self.buffers=[NSMutableDictionary dictionary];
-    NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
-    config.HTTPMaximumConnectionsPerHost=2; config.timeoutIntervalForRequest=15; config.timeoutIntervalForResource=20;
-    config.URLCache=nil; config.HTTPCookieStorage=nil; config.URLCredentialStorage=nil;
-    self.network=[NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:[NSOperationQueue mainQueue]];
+    self.pending=[NSMutableDictionary dictionary]; self.retryAfter=[NSMutableDictionary dictionary];
+    self.network=[[JMHTTPClient alloc] initWithProtocolClasses:nil legacy:NO];
+    self.network.maximumResponseBytes=JMAvatarByteLimit; self.network.resourceTimeout=20; self.network.allowsSameOriginRedirects=YES;
+    self.network.responseValidator=^BOOL(NSURLResponse *response) {
+        return [response isKindOfClass:[NSHTTPURLResponse class]] && [(NSHTTPURLResponse *)response statusCode]==200 && [response.MIMEType hasPrefix:@"image/"];
+    };
     NSURL *root=[[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
     self.cacheDirectory=[root URLByAppendingPathComponent:@"JimmMac/Avatars" isDirectory:YES];
     [[NSFileManager defaultManager] createDirectoryAtURL:self.cacheDirectory withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:NULL];
@@ -104,14 +105,19 @@ NSImage *JMDecodeAvatar(NSData *data) {
     NSString *url=[@"https://jimm.online/webapi/expressions/get?" stringByAppendingString:JMFormEncode(@{@"t":uin,@"type":@"buddyIcon"})];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
     [request setValue:@"image/*" forHTTPHeaderField:@"Accept"]; [request setValue:@"no-store" forHTTPHeaderField:@"Cache-Control"];
-    NSURLSessionDataTask *task=[self.network dataTaskWithRequest:request]; task.taskDescription=uin;
-    self.pending[uin]=task; self.buffers[@(task.taskIdentifier)]=[NSMutableData data]; [task resume]; return nil;
+    __weak JMAvatarStore *weakSelf=self;
+    __block __weak JMHTTPTask *weakTask;
+    JMHTTPTask *task=[self.network dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+        [weakSelf completeDownloadForUIN:uin task:weakTask data:data error:error];
+    }];
+    weakTask=task; self.pending[uin]=task; [task resume]; return nil;
 }
 - (void)cancelDownloadForUIN:(NSString *)uin {
-    NSURLSessionDataTask *task=self.pending[uin];
+    JMHTTPTask *task=self.pending[uin];
     if (!task) return;
-    [self.pending removeObjectForKey:uin]; [self.buffers removeObjectForKey:@(task.taskIdentifier)]; [task cancel];
+    [self.pending removeObjectForKey:uin]; [task cancel];
 }
+
 - (void)refreshUIN:(NSString *)uin {
     if (!JMValidUIN(uin)) return;
     [self cancelDownloadForUIN:uin];
@@ -129,19 +135,9 @@ NSImage *JMDecodeAvatar(NSData *data) {
     if ([data writeToURL:file options:NSDataWritingAtomic error:NULL]) [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions:@0600} ofItemAtPath:file.path error:NULL];
     [self.delegate avatarStore:self updatedUIN:uin];
 }
-- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler {
-    BOOL valid=[response isKindOfClass:[NSHTTPURLResponse class]] && [(NSHTTPURLResponse *)response statusCode]==200 &&
-        [response.MIMEType hasPrefix:@"image/"] && response.expectedContentLength<=(long long)JMAvatarByteLimit;
-    completionHandler(valid ? NSURLSessionResponseAllow : NSURLSessionResponseCancel);
-}
-- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
-    NSMutableData *buffer=self.buffers[@(task.taskIdentifier)];
-    if (buffer.length+data.length>JMAvatarByteLimit) { [task cancel]; return; } [buffer appendData:data];
-}
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    NSString *uin=task.taskDescription; NSData *data=self.buffers[@(task.taskIdentifier)];
-    [self.buffers removeObjectForKey:@(task.taskIdentifier)]; if (!JMValidUIN(uin) || self.pending[uin]!=task) return; [self.pending removeObjectForKey:uin];
-    if (!self.network) return;
+- (void)completeDownloadForUIN:(NSString *)uin task:(JMHTTPTask *)task data:(NSData *)data error:(NSError *)error {
+    if (!JMValidUIN(uin) || self.pending[uin]!=task || !task) return;
+    [self.pending removeObjectForKey:uin]; if (!self.network) return;
     NSImage *image=error ? nil : [self decode:data];
     if (image) {
         [self.images setObject:image forKey:uin cost:(NSUInteger)(image.size.width*image.size.height*4)];
@@ -150,10 +146,5 @@ NSImage *JMDecodeAvatar(NSData *data) {
     } else self.retryAfter[uin]=[NSDate dateWithTimeIntervalSinceNow:300];
     [self.delegate avatarStore:self updatedUIN:uin];
 }
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completionHandler {
-    BOOL sameOrigin=[request.URL.scheme isEqualToString:@"https"] && [request.URL.host isEqualToString:@"jimm.online"] &&
-        (!request.URL.port || [request.URL.port integerValue]==443) && !request.URL.user.length && !request.URL.password.length;
-    completionHandler(sameOrigin ? request : nil);
-}
-- (void)invalidate { [self.network invalidateAndCancel]; self.network=nil; self.delegate=nil; [self.pending removeAllObjects]; [self.buffers removeAllObjects]; }
+- (void)invalidate { [self.network invalidateAndCancel]; self.network=nil; self.delegate=nil; [self.pending removeAllObjects]; }
 @end

@@ -29,6 +29,8 @@ NSImage *JMFlowerImage(void) {
     return image;
 }
 NSColor *JMSecondaryTextColor(void) { return [NSColor colorWithCalibratedWhite:0.34 alpha:1]; }
+NSColor *JMLegacyHeaderTopColor(void) { return [NSColor colorWithCalibratedRed:0.97 green:0.99 blue:0.94 alpha:1]; }
+NSColor *JMLegacyHeaderBottomColor(void) { return [NSColor colorWithCalibratedRed:0.81 green:0.88 blue:0.75 alpha:1]; }
 @implementation JMChromeView
 - (void)drawRect:(NSRect)dirtyRect {
     NSColor *top = self.topColor ?: [NSColor colorWithCalibratedWhite:0.97 alpha:1];
@@ -51,11 +53,16 @@ NSColor *JMSelectionColor(BOOL emphasized) {
 - (void)setSelected:(BOOL)value { [super setSelected:value]; [self refreshCells]; }
 @end
 @implementation JMComposerView
+- (NSUndoManager *)undoManager {
+    // A conversation's edits must never undo into another peer's draft or a field editor.
+    if (!_composerUndoManager) _composerUndoManager=[[NSUndoManager alloc] init];
+    return _composerUndoManager;
+}
 - (void)setString:(NSString *)string { [super setString:string]; self.needsDisplay=YES; }
 - (void)didChangeText { [super didChangeText]; self.needsDisplay=YES; }
 - (void)drawRect:(NSRect)dirtyRect {
     [super drawRect:dirtyRect];
-    if (self.string.length || self.hasMarkedText || !self.editable || !self.placeholder.length) return;
+    if (self.string.length || self.hasMarkedText || !self.isEditable || !self.placeholder.length) return;
     NSMutableParagraphStyle *style=[[NSMutableParagraphStyle alloc] init]; style.lineBreakMode=NSLineBreakByTruncatingTail;
     NSPoint origin=self.textContainerOrigin; origin.x+=self.textContainer.lineFragmentPadding;
     [self.placeholder drawInRect:NSMakeRect(origin.x,origin.y,MAX(0,NSWidth(self.bounds)-origin.x-12),MAX(0,NSHeight(self.bounds)-origin.y))
@@ -89,7 +96,7 @@ NSColor *JMSelectionColor(BOOL emphasized) {
 }
 - (void)layoutContents {
     CGFloat width=MIN(420,MAX(0,NSWidth(self.bounds)-40)), center=floor(NSWidth(self.bounds)/2);
-    CGFloat top=floor((NSHeight(self.bounds)+(self.writeButton.hidden ? 150 : 200))/2);
+    CGFloat top=floor((NSHeight(self.bounds)+(self.writeButton.isHidden ? 150 : 200))/2);
     self.flower.frame=NSMakeRect(center-24,top-48,48,48);
     self.titleLabel.frame=NSMakeRect(center-width/2,top-86,width,26);
     self.detailLabel.frame=NSMakeRect(center-width/2,top-132,width,40);

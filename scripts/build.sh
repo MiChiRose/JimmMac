@@ -5,11 +5,11 @@ BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build}"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 APP="$BUILD_DIR/JimmMac.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-xcrun --sdk macosx clang -arch x86_64 -mmacosx-version-min=10.9 -isysroot "$SDK_PATH" \
+xcrun --sdk macosx clang -arch x86_64 -mmacosx-version-min=10.8 -isysroot "$SDK_PATH" \
     -fobjc-arc -fblocks -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations \
-    -framework Cocoa -framework ImageIO -framework Security \
-    "$PROJECT_ROOT/Sources/main.m" "$PROJECT_ROOT/Sources/JMAppDelegate.m" \
-    "$PROJECT_ROOT/Sources/JMAPIClient.m" "$PROJECT_ROOT/Sources/JMProtocol.m" \
+    -framework Cocoa -framework Carbon -framework ImageIO -framework Security \
+    "$PROJECT_ROOT/Sources/main.m" "$PROJECT_ROOT/Sources/JMAppDelegate.m" "$PROJECT_ROOT/Sources/JMKeyboard.m" "$PROJECT_ROOT/Sources/JMInformationController.m" \
+    "$PROJECT_ROOT/Sources/JMAPIClient.m" "$PROJECT_ROOT/Sources/JMHTTPClient.m" "$PROJECT_ROOT/Sources/JMProtocol.m" \
     "$PROJECT_ROOT/Sources/JMHistory.m" "$PROJECT_ROOT/Sources/JMDraftStore.m" "$PROJECT_ROOT/Sources/JMLoginStore.m" "$PROJECT_ROOT/Sources/JMStyle.m" "$PROJECT_ROOT/Sources/JMAvatarStore.m" "$PROJECT_ROOT/Sources/JMAudioAlerts.m" \
     "$PROJECT_ROOT/Sources/JMTextTools.m" "$PROJECT_ROOT/Sources/JMChatPreferences.m" "$PROJECT_ROOT/Sources/JMNotificationAlerts.m" "$PROJECT_ROOT/Sources/JMOwnProfileController.m" -o "$APP/Contents/MacOS/JimmMac"
 cp "$PROJECT_ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"

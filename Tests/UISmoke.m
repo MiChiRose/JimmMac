@@ -11,11 +11,23 @@
 #import "JMOwnProfileController.h"
 #import "JMDraftStore.h"
 #import "JMLoginStore.h"
+#import "JMInformationController.h"
+#import "JMKeyboard.h"
+#import "JMHTTPClient.h"
+@interface JMHTTPTask (TransportProbe)
+- (BOOL)allowsRedirect:(NSURLRequest *)request;
+@end
+@interface JMAvatarStore (DownloadProbe)
+- (void)completeDownloadForUIN:(NSString *)uin task:(JMHTTPTask *)task data:(NSData *)data error:(NSError *)error;
+@end
 #import <ImageIO/ImageIO.h>
 #import <math.h>
 
 @interface JMAppDelegate (SmokeAccess)
 - (void)selectPeer:(NSString *)peer;
+- (void)about:(id)sender;
+- (void)showKeyboardHelp:(id)sender;
+- (void)openTelegraphica:(id)sender;
 - (NSAlert *)newConversationPrompt;
 - (NSAlert *)newAddContactPrompt;
 - (void)changeSection:(id)sender;
@@ -142,21 +154,24 @@ static NSURL *testDraftRoot;
 - (void)removeNotification:(NSUserNotification *)notification;
 - (void)clearDeliveredNotifications;
 - (void)flushPeer:(NSString *)peer;
+- (BOOL)supportsNotificationIdentifiers;
 @end
 @interface FakeNotificationAlerts : JMNotificationAlerts
 @property(nonatomic, strong) NSMutableArray *posted;
+@property(nonatomic) BOOL legacyIdentifiers;
 @end
 @implementation FakeNotificationAlerts
+- (BOOL)supportsNotificationIdentifiers { return !self.legacyIdentifiers && [super supportsNotificationIdentifiers]; }
 - (id)initWithDefaults:(NSUserDefaults *)defaults center:(NSUserNotificationCenter *)center {
     self=[super initWithDefaults:defaults center:nil]; if (self) self.posted=[NSMutableArray array]; return self;
 }
 - (BOOL)postNotification:(NSUserNotification *)notification {
-    for (NSUserNotification *old in [self.posted copy]) if ([old.identifier isEqualToString:notification.identifier]) [self.posted removeObject:old];
+    for (NSUserNotification *old in [self.posted copy]) if (notification.identifier.length && [old.identifier isEqualToString:notification.identifier]) [self.posted removeObject:old];
     [self.posted addObject:notification]; return YES; // No real system banners in automated tests.
 }
 - (NSArray *)deliveredNotifications { return [self.posted copy]; }
 - (void)removeNotification:(NSUserNotification *)notification {
-    for (NSUserNotification *old in [self.posted copy]) if ([old.identifier isEqualToString:notification.identifier]) [self.posted removeObject:old];
+    [self.posted removeObjectIdenticalTo:notification];
 }
 - (void)clearDeliveredNotifications { [self.posted removeAllObjects]; }
 @end
@@ -308,6 +323,30 @@ static void ReturnInWindow(NSWindow *window, NSUInteger flags) {
     NSEvent *key=[NSEvent keyEventWithType:NSKeyDown location:NSZeroPoint modifierFlags:flags timestamp:[[NSProcessInfo processInfo] systemUptime] windowNumber:window.windowNumber context:nil characters:@"\r" charactersIgnoringModifiers:@"\r" isARepeat:NO keyCode:36];
     [NSApp sendEvent:key];
 }
+static void KeyInWindow(NSWindow *window, NSString *key, NSUInteger flags, unsigned short code) {
+    [NSApp activateIgnoringOtherApps:YES]; [window makeKeyAndOrderFront:nil];
+    PumpUI(0.05); [window makeKeyWindow];
+    for (NSMenuItem *item in [[NSApp mainMenu] itemArray]) [item.submenu update];
+    NSEvent *event=[NSEvent keyEventWithType:NSKeyDown location:NSZeroPoint modifierFlags:flags timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil characters:([key isEqualToString:@"\t"] && (flags & NSShiftKeyMask)) ? @"\031" : key charactersIgnoringModifiers:([key isEqualToString:@"\t"] && (flags & NSShiftKeyMask)) ? @"\031" : key isARepeat:NO keyCode:code];
+    [NSApp sendEvent:event]; PumpUI(0.05);
+}
+static NSArray *PreserveClipboard(void) {
+    NSMutableArray *saved=[NSMutableArray array];
+    for (NSPasteboardItem *item in NSPasteboard.generalPasteboard.pasteboardItems) {
+        NSMutableDictionary *values=[NSMutableDictionary dictionary];
+        for (NSString *type in item.types) { NSData *data=[item dataForType:type]; if (data) values[type]=data; }
+        [saved addObject:values];
+    }
+    return saved;
+}
+static void RestoreClipboard(NSArray *saved) {
+    NSMutableArray *items=[NSMutableArray array];
+    for (NSDictionary *values in saved) {
+        NSPasteboardItem *item=[[NSPasteboardItem alloc] init];
+        for (NSString *type in values) [item setData:values[type] forType:type]; [items addObject:item];
+    }
+    [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard writeObjects:items];
+}
 static void Draft(SmokeDelegate *delegate, NSTextView *composer, NSString *text) {
     composer.string=text; [composer setSelectedRange:NSMakeRange(text.length,0)];
     [delegate textDidChange:[NSNotification notificationWithName:NSTextDidChangeNotification object:composer]];
@@ -325,8 +364,10 @@ static void FinishSend(UIClient *client, NSString *identifier, NSError *error) {
 @property(nonatomic, strong) NSAlert *alert;
 @property(nonatomic, copy) NSString *snapshotPath;
 - (void)edit:(NSTimer *)timer;
+- (void)timeout:(NSTimer *)timer;
 @end
 @implementation PromptFixture
+- (void)timeout:(NSTimer *)timer { if ([NSApp modalWindow]==self.alert.window) { fprintf(stderr,"FAIL: Escape did not close fixture modal within deadline\n"); exit(1); } }
 - (void)edit:(NSTimer *)timer {
     NSView *accessory=self.alert.accessoryView;
     NSTextField *recipient=[accessory isKindOfClass:[NSTextField class]] ? (NSTextField *)accessory : (NSTextField *)[accessory viewWithTag:101];
@@ -341,7 +382,17 @@ static void FinishSend(UIClient *client, NSString *identifier, NSError *error) {
         NSBitmapImageRep *bitmap=[view bitmapImageRepForCachingDisplayInRect:view.bounds];
         [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap]; [[bitmap representationUsingType:NSPNGFileType properties:@{}] writeToFile:self.snapshotPath atomically:YES];
     }
-    [NSApp stopModalWithCode:NSAlertSecondButtonReturn];
+    NSTimer *watchdog=[NSTimer timerWithTimeInterval:5 target:self selector:@selector(timeout:) userInfo:nil repeats:NO];
+    [[NSRunLoop mainRunLoop] addTimer:watchdog forMode:NSModalPanelRunLoopMode];
+    NSArray *clipboard=PreserveClipboard();
+    @try {
+        [window makeFirstResponder:recipient];
+        KeyInWindow(window,@"a",NSCommandKeyMask,0); KeyInWindow(window,@"c",NSCommandKeyMask,8); KeyInWindow(window,@"x",NSCommandKeyMask,7);
+        CheckUI([[recipient currentEditor] string].length==0,"Cmd+X edits UIN in application-modal alert");
+        KeyInWindow(window,@"v",NSCommandKeyMask,9);
+        CheckUI([[[recipient currentEditor] string] isEqualToString:@"11114"],"Cmd+V restores UIN in application-modal alert");
+        KeyInWindow(window,@"\e",0,53);
+    } @finally { RestoreClipboard(clipboard); }
 }
 @end
 static void Capture(NSWindow *window, NSString *path) {
@@ -357,7 +408,7 @@ int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc != 2) return 2;
         NSString *output = [NSString stringWithUTF8String:argv[1]];
-        NSApplication *app = [NSApplication sharedApplication]; [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        NSApplication *app = [JMApplication sharedApplication]; [app setActivationPolicy:NSApplicationActivationPolicyAccessory];
         NSString *suite=[@"online.jimm.tests." stringByAppendingString:[[NSUUID UUID] UUIDString]];
         NSUserDefaults *fontDefaults=[[NSUserDefaults alloc] initWithSuiteName:suite]; testAlertDefaults=fontDefaults;
         SmokeDelegate *delegate = [[SmokeDelegate alloc] init]; [app setDelegate:delegate];
@@ -630,10 +681,10 @@ int main(int argc, const char *argv[]) {
         NSBitmapImageRep *transparent=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:20 pixelsHigh:20 bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:80 bitsPerPixel:32];
         memset([transparent bitmapData],0,1600);
         CheckUI(JMDecodeAvatar([transparent representationUsingType:NSPNGFileType properties:@{}])==nil, "fully transparent avatar uses visible system fallback");
-        JMAvatarStore *avatars=[[JMAvatarStore alloc] init]; [avatars invalidate];
-        __block BOOL externalAllowed=YES;
-        [avatars URLSession:nil task:nil willPerformHTTPRedirection:nil newRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://external.invalid/avatar"]] completionHandler:^(NSURLRequest *request) { externalAllowed=request!=nil; }];
-        CheckUI(!externalAllowed, "avatar redirect cannot disclose request to another origin");
+        JMHTTPClient *redirectClient=[[JMHTTPClient alloc] initWithProtocolClasses:nil legacy:YES]; redirectClient.allowsSameOriginRedirects=YES;
+        JMHTTPTask *redirectTask=[redirectClient dataTaskWithRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://jimm.online/avatar"]] completionHandler:nil];
+        CheckUI(![redirectTask allowsRedirect:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://external.invalid/avatar"]]],"avatar redirect cannot disclose request to another origin");
+        [redirectClient invalidateAndCancel];
         {
             NSBitmapImageRep *photo=[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:640 pixelsHigh:400 bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:2560 bitsPerPixel:32];
             unsigned char *pixels=photo.bitmapData;
@@ -657,11 +708,11 @@ int main(int argc, const char *argv[]) {
             JMAvatarStore *raceStore=[[JMAvatarStore alloc] init];
             NSURL *cache=[root URLByAppendingPathComponent:@"avatar-cache" isDirectory:YES]; [[NSFileManager defaultManager] createDirectoryAtURL:cache withIntermediateDirectories:YES attributes:nil error:NULL];
             [raceStore setValue:cache forKey:@"cacheDirectory"];
-            NSURLSession *inert=[NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration ephemeralSessionConfiguration]];
-            NSURLSessionDataTask *old=[inert dataTaskWithURL:[NSURL URLWithString:@"https://fixture.invalid/old-avatar"]]; old.taskDescription=@"111";
-            [[raceStore valueForKey:@"pending"] setObject:old forKey:@"111"]; [[raceStore valueForKey:@"buffers"] setObject:[NSMutableData dataWithData:rotated] forKey:@(old.taskIdentifier)];
+            JMHTTPClient *inert=[[JMHTTPClient alloc] initWithProtocolClasses:nil legacy:YES];
+            JMHTTPTask *old=[inert dataTaskWithRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://fixture.invalid/old-avatar"]] completionHandler:nil];
+            [[raceStore valueForKey:@"pending"] setObject:old forKey:@"111"];
             [raceStore storeUploadedAvatar:jpeg forUIN:@"111"]; NSImage *newImage=[raceStore imageForUIN:@"111"];
-            [raceStore URLSession:nil task:old didCompleteWithError:nil];
+            [raceStore completeDownloadForUIN:@"111" task:old data:rotated error:nil];
             CheckUI(newImage!=nil && [raceStore imageForUIN:@"111"]==newImage && [[[raceStore valueForKey:@"pending"] allKeys] count]==0,"stale avatar download cannot replace a successful upload");
             [inert invalidateAndCancel]; [raceStore invalidate];
             FixtureAvatarStore *ownAvatars=[[FixtureAvatarStore alloc] init];
@@ -863,7 +914,7 @@ int main(int argc, const char *argv[]) {
             TypeInWindow(chat,@" + следующий текст"); ReturnInWindow(chat,0);
             CheckUI(client.sendCount==sends+1,"second Enter cannot duplicate a pending send");
             FinishSend(client,@"compose-send-1",nil);
-            CheckUI([composer.string isEqualToString:@" + следующий текст"],"confirmation removes sent prefix while preserving text typed afterward");
+            CheckUI([composer.string isEqualToString:@" + следующий текст"] && !composer.undoManager.canUndo,"confirmation removes sent prefix, preserves new text and cannot undo into sent content");
             Draft(delegate,composer,@"Сообщение для замены"); ReturnInWindow(chat,0);
             [composer setSelectedRange:NSMakeRange(0,composer.string.length)]; TypeInWindow(chat,@"Новый отдельный черновик");
             [delegate flushDrafts]; disk=[[JMDraftStore alloc] initWithUIN:@"111" root:root];
@@ -1000,7 +1051,19 @@ int main(int argc, const char *argv[]) {
                 @{@"id":@"visual-unread-1",@"peer":@"888",@"text":@"Привет!",@"timestamp":@1793343538,@"outgoing":@NO},
                 @{@"id":@"visual-unread-2",@"peer":@"888",@"text":@"Я тоже вошла со старого Mac.",@"timestamp":@1793343539,@"outgoing":@NO},
                 @{@"id":@"visual-unread-3",@"peer":@"888",@"text":@"Напиши, когда освободишься.",@"timestamp":@1793343540,@"outgoing":@NO}]) [visualHistory appendMessage:message error:NULL];
-            [delegate setValue:visualHistory forKey:@"history"]; [delegate setValue:@"555" forKey:@"accountUIN"];
+            [delegate setValue:visualHistory forKey:@"history"];
+            {
+                id reading=delegate.forcedReading; delegate.forcedReading=@NO;
+                FakeNotificationAlerts *legacy=[[FakeNotificationAlerts alloc] initWithDefaults:fontDefaults center:nil]; legacy.legacyIdentifiers=YES; legacy.delegate=(id<JMNotificationAlertsDelegate>)delegate; legacy.accountUIN=@"111"; legacy.enabled=YES;
+                [legacy queueMessageFrom:@"222" name:@"Тест A" text:@"Первое"]; [legacy flushPeer:@"222"];
+                [legacy queueMessageFrom:@"333" name:@"Тест B" text:@"Второе"]; [legacy flushPeer:@"333"];
+                CheckUI(legacy.posted.count==2 && [[legacy.posted lastObject] identifier]==nil,"Mountain Lion notifications work without identifier property and retain separate peers");
+                [legacy queueMessageFrom:@"222" name:@"Тест A" text:@"Замена"]; [legacy flushPeer:@"222"];
+                CheckUI(legacy.posted.count==2,"Mountain Lion coalescing replaces only matching account and peer");
+                [legacy clearPeer:@"222"]; CheckUI(legacy.posted.count==1 && [[[legacy.posted lastObject] userInfo][@"peer"] isEqualToString:@"333"],"Mountain Lion clear-peer preserves other delivered notification");
+                [legacy invalidate]; delegate.forcedReading=reading;
+            }
+ [delegate setValue:@"555" forKey:@"accountUIN"];
             [delegate client:client receivedBuddyList:@{@"groups":@[@{@"name":@"Друзья",@"buddies":@[@{@"aimId":@"666",@"friendly":@"Иван",@"state":@"online"},@{@"aimId":@"777",@"friendly":@"Анна",@"state":@"away"},@{@"aimId":@"888",@"friendly":@"Мария",@"state":@"away"}]}]}];
             [[delegate valueForKey:@"conversationPeers"] addObject:@"888"]; [[delegate valueForKey:@"unread"] setObject:@3 forKey:@"888"];
             [delegate client:client receivedOwnInfo:@{@"friendly":@"Тестовый пользователь",@"state":@"online"}];
@@ -1020,6 +1083,105 @@ int main(int argc, const char *argv[]) {
             JMListCell *unreadCell=(JMListCell *)[[delegate valueForKey:@"contactTable"] viewAtColumn:0 row:1 makeIfNecessary:YES];
             CheckUI(![[unreadCell valueForKey:@"badge"] isHidden] && [[[unreadCell valueForKey:@"badge"] valueForKey:@"text"] isEqualToString:@"3"],"visible conversation row displays unread count alongside last-message preview");
             [history scrollRangeToVisible:NSMakeRange(0,0)]; Capture(chat,[output stringByAppendingPathComponent:@"UI-chat-polished.png"]);
+            {
+                NSArray *clipboard=PreserveClipboard();
+                @try {
+                    [chat makeKeyAndOrderFront:nil]; [chat makeFirstResponder:composer]; Draft(delegate,composer,@""); [composer.undoManager removeAllActions];
+                    TypeInWindow(chat,@"Проверка клавиатуры"); PumpUI(0.1);
+                    KeyInWindow(chat,@"a",NSCommandKeyMask,0);
+                    CheckUI(composer.selectedRange.length==composer.string.length,"Cmd+A selects composer text through native menu");
+                    KeyInWindow(chat,@"c",NSCommandKeyMask,8);
+                    CheckUI([[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqualToString:@"Проверка клавиатуры"],"Cmd+C copies real composer selection");
+                    [NSPasteboard.generalPasteboard clearContents]; [NSPasteboard.generalPasteboard setString:@"clipboard-fixture" forType:NSPasteboardTypeString];
+                    KeyInWindow(chat,@"с",NSCommandKeyMask,8);
+                    CheckUI([[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqualToString:@"Проверка клавиатуры"],"Cmd+C works with Cyrillic characters on Russian keyboard layout");
+                    KeyInWindow(chat,@"x",NSCommandKeyMask,7);
+                    CheckUI(composer.string.length==0,"Cmd+X cuts editable text");
+                    KeyInWindow(chat,@"v",NSCommandKeyMask,9);
+                    CheckUI([composer.string isEqualToString:@"Проверка клавиатуры"],"Cmd+V pastes Unicode text");
+                    KeyInWindow(chat,@"z",NSCommandKeyMask,6);
+                    CheckUI(composer.string.length==0,"Cmd+Z undoes actual paste");
+                    KeyInWindow(chat,@"Z",NSCommandKeyMask|NSShiftKeyMask,6);
+                    CheckUI([composer.string isEqualToString:@"Проверка клавиатуры"],"Shift+Cmd+Z redoes actual paste");
+                    [composer setSelectedRange:NSMakeRange(composer.string.length,0)];
+                    KeyInWindow(chat,@"\t",NSAlternateKeyMask,48);
+                    CheckUI([composer.string hasSuffix:@"\t"],"Option+Tab inserts a literal tab when explicitly requested");
+                    KeyInWindow(chat,@"\177",0,51);
+                    CheckUI(![composer.string hasSuffix:@"\t"],"Delete removes previous character in composer");
+                    [delegate selectPeer:@"777"];
+                    CheckUI(!composer.undoManager.canUndo && !composer.undoManager.canRedo,"switching peer resets undo and redo so another draft cannot leak");
+                    [delegate selectPeer:@"666"]; Draft(delegate,composer,@"Не отправлять"); NSUInteger sends=client.sendCount;
+                    KeyInWindow(chat,@"\e",0,53);
+                    NSTableView *list=[delegate valueForKey:@"contactTable"];
+                    CheckUI(chat.firstResponder==list && [composer.string isEqualToString:@"Не отправлять"] && client.sendCount==sends,"Escape returns composer focus to list without clearing or sending draft");
+                    KeyInWindow(chat,@"1",NSCommandKeyMask,18);
+                    CheckUI(tabs.selectedSegment==0 && chat.firstResponder==list,"Cmd+1 opens contacts and focuses native list");
+                    [list selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+                    NSInteger row=list.selectedRow; KeyInWindow(chat,[NSString stringWithFormat:@"%C",(unichar)NSDownArrowFunctionKey],NSFunctionKeyMask,125);
+                    CheckUI(list.selectedRow==row+1 && chat.firstResponder==list,"Down arrow selects next contact and keeps keyboard navigation in list");
+                    KeyInWindow(chat,[NSString stringWithFormat:@"%C",(unichar)NSUpArrowFunctionKey],NSFunctionKeyMask,126);
+                    CheckUI(list.selectedRow==row && chat.firstResponder==list,"Up arrow selects previous contact without stealing focus");
+                    KeyInWindow(chat,@"\r",0,36);
+                    CheckUI(chat.firstResponder==composer && client.sendCount==sends,"Enter in contact list focuses composer without sending");
+                    KeyInWindow(chat,@"\t",0,48);
+                    CheckUI(chat.firstResponder!=composer && [composer.string rangeOfString:@"\t"].location==NSNotFound,"Tab navigates out of composer instead of modifying draft");
+                    KeyInWindow(chat,@"\t",NSShiftKeyMask,48);
+                    CheckUI(chat.firstResponder==composer,"Shift+Tab returns to previous editable element");
+                    KeyInWindow(chat,@"l",NSCommandKeyMask,37);
+                    NSSearchField *filter=[delegate valueForKey:@"searchField"];
+                    CheckUI(chat.firstResponder==filter.currentEditor && [delegate valueForKey:@"accountUIN"]!=nil,"Cmd+L focuses list search and never logs out");
+                    TypeInWindow(chat,@"Нет совпадений"); PumpUI(0.1); KeyInWindow(chat,@"\e",0,53);
+                    CheckUI(filter.stringValue.length==0 && list.numberOfRows>0,"Escape clears contact filter and restores list");
+                    KeyInWindow(chat,@"\e",0,53); CheckUI(chat.firstResponder==list,"second Escape returns search focus to contact list");
+                    KeyInWindow(chat,@"2",NSCommandKeyMask,19); CheckUI(tabs.selectedSegment==1,"Cmd+2 switches to conversations");
+                    KeyInWindow(chat,@"f",NSCommandKeyMask,3);
+                    NSWindow *search=[delegate valueForKey:@"historyWindow"];
+                    CheckUI(search.isVisible && search.isKeyWindow,"Cmd+F opens history search with focus");
+                    KeyInWindow(search,@"\e",0,53); CheckUI(!search.visible,"Escape closes focused history search");
+                    KeyInWindow(chat,@",",NSCommandKeyMask,43); NSWindow *prefs=[delegate valueForKey:@"preferencesWindow"];
+                    CheckUI(prefs.visible,"Cmd+comma opens preferences"); KeyInWindow(prefs,@"\e",0,53); CheckUI(!prefs.visible,"Escape closes native preferences panel");
+                    [delegate about:nil]; NSWindow *aboutWindow=[[delegate valueForKey:@"aboutController"] window];
+                    Capture(aboutWindow,[output stringByAppendingPathComponent:@"UI-about.png"]); KeyInWindow(aboutWindow,@"\e",0,53);
+                    CheckUI(!aboutWindow.visible,"Escape closes About window");
+                    [delegate showKeyboardHelp:nil]; NSWindow *helpWindow=[[delegate valueForKey:@"keyboardHelpController"] window];
+                    Capture(helpWindow,[output stringByAppendingPathComponent:@"UI-keyboard-help.png"]); KeyInWindow(helpWindow,@"w",NSCommandKeyMask,13);
+                    CheckUI(!helpWindow.visible,"Cmd+W closes keyboard help through native window menu");
+                    // Test fields and panels use only fixture values, never the user's account.
+                    NSTextField *loginUIN=[delegate valueForKey:@"uinField"], *password=[delegate valueForKey:@"passwordField"];
+                    loginUIN.stringValue=@""; [login makeKeyAndOrderFront:nil]; [login makeFirstResponder:loginUIN]; TypeInWindow(login,@"11114");
+                    NSUInteger logins=client.passwordLogins; KeyInWindow(login,@"\r",0,36);
+                    CheckUI(login.firstResponder==password.currentEditor && client.passwordLogins==logins,"Enter in UIN field advances to password without attempting login");
+                    KeyInWindow(login,@"\t",NSShiftKeyMask,48);
+                    CheckUI(login.firstResponder==loginUIN.currentEditor,"Shift+Tab returns from secure password to UIN");
+                    KeyInWindow(login,@"a",NSCommandKeyMask,0); KeyInWindow(login,@"c",NSCommandKeyMask,8);
+                    CheckUI([[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqualToString:@"11114"],"login UIN supports native select-all and copy");
+                    [login makeFirstResponder:password]; KeyInWindow(login,@"v",NSCommandKeyMask,9);
+                    CheckUI([[password.currentEditor string] isEqualToString:@"11114"],"secure password field accepts native paste");
+                    [login makeFirstResponder:nil]; password.stringValue=@""; loginUIN.stringValue=@""; [login orderOut:nil];
+                    JMOwnProfileController *profile=[[JMOwnProfileController alloc] initWithClient:client avatars:[delegate valueForKey:@"avatars"] account:@"111"];
+                    [profile showWindow:nil]; [profile loadProfile:nil]; PumpUI(0.2);
+                    NSTextField *firstName=[profile valueForKey:@"firstNameField"]; NSTextView *bio=[profile valueForKey:@"about"];
+                    [profile.window makeFirstResponder:firstName]; KeyInWindow(profile.window,@"a",NSCommandKeyMask,0); KeyInWindow(profile.window,@"v",NSCommandKeyMask,9);
+                    [profile.window makeFirstResponder:bio]; TypeInWindow(profile.window,@"Тест клавиатуры");
+                    [bio setMarkedText:@"文" selectedRange:NSMakeRange(1,0) replacementRange:NSMakeRange(bio.string.length,0)];
+                    NSEvent *imeEscape=[NSEvent keyEventWithType:NSKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:profile.window.windowNumber context:nil characters:@"\e" charactersIgnoringModifiers:@"\e" isARepeat:NO keyCode:53];
+                    CheckUI(![profile.window performKeyEquivalent:imeEscape] && profile.window.visible,"Escape is left to input method before profile close button while text is marked"); [bio unmarkText];
+                    KeyInWindow(profile.window,@"\t",0,48);
+                    CheckUI(profile.window.firstResponder!=bio && [bio.string rangeOfString:@"\t"].location==NSNotFound,"Tab navigates out of multiline profile without adding invisible tab");
+                    NSUInteger writes=client.ownCalls.count; KeyInWindow(profile.window,@"ы",NSCommandKeyMask,1); PumpUI(0.3);
+                    CheckUI(client.ownCalls.count>writes && ![[profile valueForKey:@"saveButton"] isEnabled],"Cmd+S button shortcut works with Cyrillic layout and confirms profile read-back");
+                    KeyInWindow(profile.window,@"\e",0,53); CheckUI(!profile.window.visible,"Escape closes saved profile without dropping edits"); [profile invalidate];
+                    [delegate selectPeer:@"666"]; [chat makeKeyAndOrderFront:nil]; [chat makeFirstResponder:linkedTranscript];
+                    [linkedTranscript setSelectedRange:NSMakeRange(0,MIN((NSUInteger)10,linkedTranscript.string.length))]; NSString *transcriptCopy=[linkedTranscript.string substringWithRange:linkedTranscript.selectedRange];
+                    NSRange beforeArrival=linkedTranscript.selectedRange;
+                    [delegate client:client receivedMessage:@{@"id":@"keyboard-copy-arrival",@"peer":@"666",@"text":@"Фиктивное обновление во время выделения",@"timestamp":@1793344000,@"outgoing":@NO}];
+                    CheckUI(NSEqualRanges(beforeArrival,linkedTranscript.selectedRange),"automatic incoming message preserves copy selection in existing text");
+                    KeyInWindow(chat,@"c",NSCommandKeyMask,8);
+                    CheckUI([[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqualToString:transcriptCopy],"Cmd+C copies selection from read-only transcript");
+                    [delegate openTelegraphica:nil]; CheckUI([delegate.openedURL isEqual:JMTelegraphicaURL()] && [delegate.openedURL.absoluteString isEqualToString:@"https://github.com/MiChiRose/telegraphica"],"Telegraphica action opens verified public project URL, never private sources");
+                    [delegate selectPeer:@"666"]; Draft(delegate,composer,@""); [delegate selectPeer:@"777"]; Draft(delegate,composer,@"");
+                } @finally { RestoreClipboard(clipboard); }
+            }
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
             emptyView=[delegate valueForKey:@"conversationEmptyView"]; emptyFits=YES;
             for (NSView *view in emptyView.subviews) if (!view.hidden && !NSContainsRect(emptyView.bounds,view.frame)) emptyFits=NO;
@@ -1030,12 +1192,13 @@ int main(int argc, const char *argv[]) {
         PromptFixture *promptFixture = [[PromptFixture alloc] init]; promptFixture.alert = prompt;
         NSTimer *timer = [NSTimer timerWithTimeInterval:0.1 target:promptFixture selector:@selector(edit:) userInfo:nil repeats:NO];
         [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSModalPanelRunLoopMode];
-        [prompt runModal];
+        CheckUI([prompt.buttons[1] keyEquivalent].length>0,"Russian cancel button has explicit Escape independent of OS language");
+        CheckUI([prompt runModal]==NSAlertSecondButtonReturn,"Escape cancels native conversation prompt");
         [[prompt window] orderOut:nil];
         NSAlert *addDialog=[delegate newAddContactPrompt]; promptFixture.alert=addDialog; promptFixture.snapshotPath=[output stringByAppendingPathComponent:@"UI-add-contact.png"];
         CheckUI([addDialog.accessoryView viewWithTag:102]!=nil,"add contact dialog includes server group chooser");
         timer=[NSTimer timerWithTimeInterval:0.1 target:promptFixture selector:@selector(edit:) userInfo:nil repeats:NO]; [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSModalPanelRunLoopMode];
-        [addDialog runModal]; [addDialog.window orderOut:nil];
+        CheckUI([addDialog runModal]==NSAlertSecondButtonReturn,"Escape cancels native add-contact prompt"); [addDialog.window orderOut:nil];
         [[NSFileManager defaultManager] removeItemAtURL:root error:NULL];
         [fontDefaults removePersistentDomainForName:suite]; [fontDefaults synchronize];
         [chat orderOut:nil];

@@ -1,4 +1,5 @@
 #import "JMOwnProfileController.h"
+#import "JMKeyboard.h"
 #import "JMAPIClient.h"
 #import "JMAvatarStore.h"
 #import "JMProtocol.h"
@@ -56,7 +57,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
 @end
 @implementation JMOwnProfileController
 - (id)initWithClient:(JMAPIClient *)client avatars:(JMAvatarStore *)avatars account:(NSString *)uin {
-    NSWindow *window=[[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,520,644) styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
+    NSWindow *window=[[JMWindow alloc] initWithContentRect:NSMakeRect(0,0,520,644) styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
     self=[super initWithWindow:window]; if (!self) return nil;
     self.client=client; self.avatars=avatars; self.account=uin;
     window.title=@"Мой профиль — JimmMac"; window.releasedWhenClosed=NO; window.delegate=self;
@@ -83,7 +84,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     [root addSubview:Label(@"О себе",NSMakeRect(24,307,472,20),13,YES)];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(24,149,472,150)];
     scroll.borderType=NSBezelBorder; scroll.hasVerticalScroller=YES;
-    self.about=[[NSTextView alloc] initWithFrame:scroll.contentView.bounds]; self.about.delegate=self;
+    self.about=[[JMFormTextView alloc] initWithFrame:scroll.contentView.bounds]; self.about.delegate=self;
     self.about.richText=NO; self.about.font=[NSFont systemFontOfSize:13]; self.about.allowsUndo=YES;
     self.about.verticallyResizable=YES; self.about.horizontallyResizable=NO; self.about.maxSize=NSMakeSize(FLT_MAX,FLT_MAX);
     self.about.textContainer.containerSize=NSMakeSize(NSWidth(scroll.contentView.bounds),FLT_MAX);
@@ -95,7 +96,8 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     self.reloadButton=Button(@"Обновить",NSMakeRect(18,16,116,30),self,@selector(loadProfile:)); self.reloadButton.toolTip=@"Перечитать профиль и аватар с сервера. Сначала сохраните изменения или закройте окно"; [root addSubview:self.reloadButton];
     self.closeButton=Button(@"Закрыть",NSMakeRect(272,16,108,30),self,@selector(closeEditor:)); self.closeButton.keyEquivalent=@"\e"; [root addSubview:self.closeButton];
     self.saveButton=Button(@"Сохранить",NSMakeRect(382,16,120,30),self,@selector(saveProfile:));
-    self.saveButton.toolTip=@"Сохранить изменённые поля и выбранную фотографию в Jimm.online"; [root addSubview:self.saveButton];
+    self.saveButton.keyEquivalent=@"s"; self.saveButton.keyEquivalentModifierMask=NSCommandKeyMask;
+    self.saveButton.toolTip=@"Сохранить изменённые поля и выбранную фотографию в Jimm.online (Cmd+S)"; [root addSubview:self.saveButton];
     [self.firstNameField setNextKeyView:self.lastNameField]; [self.lastNameField setNextKeyView:self.statusField];
     [self.statusField setNextKeyView:self.about]; [self.about setNextKeyView:self.saveButton];
     [window center]; [self updateControls]; return self;
@@ -130,7 +132,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
 }
 - (void)avatarUpdated { if (!self.pendingAvatar) self.avatar.image=[self.avatars imageForUIN:self.account] ?: [NSImage imageNamed:NSImageNameUser]; }
 - (void)connectionChanged {
-    if (!self.client.connected && self.window.visible && !self.busy) [self showFeedback:@"Нет соединения. Черновик остаётся в окне; сохранить можно после подключения."];
+    if (!self.client.connected && self.window.isVisible && !self.busy) [self showFeedback:@"Нет соединения. Черновик остаётся в окне; сохранить можно после подключения."];
     [self updateControls];
 }
 - (void)loadProfile:(id)sender {
@@ -300,7 +302,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     if (![self dirty]) return YES;
     NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=@"Сохранить изменения профиля?";
     alert.informativeText=@"Текст и выбранная фотография ещё не отправлены в Jimm.online.";
-    [alert addButtonWithTitle:@"Сохранить"]; [alert addButtonWithTitle:@"Не сохранять"]; [alert addButtonWithTitle:@"Отмена"];
+    [alert addButtonWithTitle:@"Сохранить"]; [alert addButtonWithTitle:@"Не сохранять"]; [[alert addButtonWithTitle:@"Отмена"] setKeyEquivalent:@"\e"];
     NSInteger answer=[alert runModal];
     if (answer==NSAlertFirstButtonReturn) { self.closeAfterSave=YES; [self saveProfile:nil]; return NO; }
     if (answer==NSAlertSecondButtonReturn) { self.pendingAvatar=nil; self.loaded=NO; return YES; }

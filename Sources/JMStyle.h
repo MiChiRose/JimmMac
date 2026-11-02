@@ -3,6 +3,8 @@ NSImage *JMFlowerImage(void);
 NSImage *JMStatusImage(NSString *state);
 NSColor *JMSecondaryTextColor(void);
 NSColor *JMSelectionColor(BOOL emphasized);
+NSColor *JMLegacyHeaderTopColor(void);
+NSColor *JMLegacyHeaderBottomColor(void);
 @interface JMChromeView : NSView
 @property(nonatomic, strong) NSColor *topColor;
 @property(nonatomic, strong) NSColor *bottomColor;
@@ -11,6 +13,7 @@ NSColor *JMSelectionColor(BOOL emphasized);
 @end
 @interface JMComposerView : NSTextView
 @property(nonatomic, copy) NSString *placeholder;
+@property(nonatomic, strong) NSUndoManager *composerUndoManager;
 @end
 @interface JMConversationEmptyView : NSView
 @property(nonatomic, strong, readonly) NSButton *writeButton;
