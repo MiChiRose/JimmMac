@@ -281,6 +281,7 @@ int main(void) {
         FixtureClient *client = [[FixtureClient alloc] init]; FixtureDelegate *delegate = [[FixtureDelegate alloc] init]; client.delegate = delegate;
         [client loginWithUIN:@"111" password:@"fixture-only"]; Pump(0.8);
         Check(delegate.online && delegate.buddyCount == 1, @"transport login → startSession → contacts integration");
+        Check([delegate.lastStatus isEqualToString:@"Подключено"],@"connection status does not duplicate account UIN from header");
         Check(delegate.messageCount == 2 && delegate.presenceCount == 1, @"long polling delivers offline, presence and sentIM events");
         NSString *lastForm = [forms lastObject];
         Check([lastForm rangeOfString:@"seqNum=11"].location != NSNotFound, @"next poll advances sequence after processing events");

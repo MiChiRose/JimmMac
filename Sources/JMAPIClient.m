@@ -137,7 +137,7 @@
         if ([self.delegate respondsToSelector:@selector(client:receivedOwnInfo:)]) [self.delegate client:self receivedOwnInfo:JMDictionary(data[@"myInfo"])];
         if (self.deliverLoginToken && [self.delegate respondsToSelector:@selector(client:authenticatedWithToken:expiresAt:)]) [self.delegate client:self authenticatedWithToken:self.token expiresAt:self.tokenExpiration];
         self.deliverLoginToken=NO;
-        [self status:[NSString stringWithFormat:@"Подключено · UIN %@", self.uin] connected:YES];
+        [self status:@"Подключено" connected:YES];
         NSString *state=JMString(JMDictionary(data[@"myInfo"])[@"state"]);
         if (self.preferredPresence && ![self.preferredPresence isEqualToString:state])
             [self setPresenceState:self.preferredPresence completion:^(NSDictionary *info,NSError *error) {}];
@@ -209,7 +209,7 @@
         }
         long long last = [JMString(data[@"lastSeqNum"]) longLongValue];
         self.sequence = MAX(self.sequence, last);
-        [self status:[NSString stringWithFormat:@"Подключено · UIN %@", self.uin] connected:YES];
+        [self status:@"Подключено" connected:YES];
         NSTimeInterval delay = [JMString(data[@"timeToNextFetch"]) doubleValue] / 1000.0;
         [self schedulePoll:MAX(0.25, MIN(60, delay))];
     }];

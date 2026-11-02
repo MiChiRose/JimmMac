@@ -12,7 +12,7 @@ static void Pump(NSTimeInterval seconds) { [[NSRunLoop mainRunLoop] runUntilDate
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { return [request.URL.host isEqualToString:@"transport.invalid"]; }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
-    Check(!self.request.HTTPShouldHandleCookies && self.request.cachePolicy==NSURLRequestReloadIgnoringLocalCacheData,"cookies and shared cache are disabled");
+    if (self.request.HTTPShouldHandleCookies || self.request.cachePolicy!=NSURLRequestReloadIgnoringLocalCacheData) { fprintf(stderr,"FAIL: cookies and shared cache must be disabled\n"); exit(1); }
     if ([self.request.URL.path isEqualToString:@"/hang"]) return;
     NSDictionary *headers=[self.request.URL.path isEqualToString:@"/length"] ? @{@"Content-Length":@"512",@"Content-Type":@"image/png"} : @{@"Content-Type":@"image/png"};
     NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:headers];

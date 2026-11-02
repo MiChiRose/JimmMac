@@ -393,7 +393,7 @@ static NSString *JMState(NSDictionary *contact) {
     [flower setImage:JMFlowerImage()]; [flower setImageScaling:NSImageScaleProportionallyUpOrDown]; [toolbar addSubview:flower];
     [toolbar addSubview:JMLabel(@"JimmMac",NSMakeRect(65,31,200,25),18,YES)];
     NSTextField *subtitle = JMLabel(@"ICQ · Jimm.online",NSMakeRect(66,13,200,18),11,NO); [subtitle setTextColor:JMSecondaryTextColor()]; [toolbar addSubview:subtitle];
-    self.accountLabel = JMLabel(@"Не подключено",NSMakeRect(400,36,570,21),12,NO);
+    self.accountLabel = JMLabel(@"Учётная запись",NSMakeRect(400,36,570,21),12,NO);
     [self.accountLabel setAlignment:NSRightTextAlignment]; [self.accountLabel setAutoresizingMask:NSViewMinXMargin]; [toolbar addSubview:self.accountLabel];
     self.presencePopup=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(802,5,176,29) pullsDown:NO];
     NSArray *states=@[@"online",@"away",@"dnd",@"occupied",@"invisible"];
@@ -515,8 +515,13 @@ static NSString *JMState(NSDictionary *contact) {
     self.logoutButton=logout; [logout setToolTip:@"Выйти из аккаунта и отключиться от Jimm.online"];
     [logout setAutoresizingMask:NSViewMinXMargin]; [root addSubview:logout];
     self.soundButton=JMButton(@"",NSMakeRect(766,3,126,30),self,@selector(toggleSounds:)); [root addSubview:self.soundButton];
-    [self.searchField setNextKeyView:self.contactTable]; [self.contactTable setNextKeyView:self.composer];
-    [self.composer setNextKeyView:self.sendButton]; [self.sendButton setNextKeyView:self.searchField];
+    // Include every control in the loop. AppKit skips hidden/disabled controls
+    // and follows the user's Full Keyboard Access preference for buttons.
+    NSArray *keyViews=@[self.presencePopup,self.sectionControl,self.searchField,self.groupFilter,self.contactTable,
+        self.addContactButton,write,self.historySearchButton,self.profileButton,self.addPeerButton,
+        self.conversationEmptyView.writeButton,self.transcript,self.latestMessagesButton,self.composer,
+        self.sendButton,self.soundButton,self.logoutButton,self.reconnectButton];
+    for (NSUInteger i=0;i<keyViews.count;i++) [keyViews[i] setNextKeyView:keyViews[(i+1)%keyViews.count]];
     self.chatWindow.autorecalculatesKeyViewLoop=NO;
     self.chatWindow.initialFirstResponder=self.searchField;
     [self refreshGroupChoices]; [self updateSoundControls]; [self updatePeerLabel]; [self layoutChatWindow]; [self updateSendButton]; [self reloadContacts];
@@ -1222,12 +1227,16 @@ static NSString *JMState(NSDictionary *contact) {
     if (!connected) { self.connectedSince=nil; JMSetLabel(self.presenceFeedback,@""); }
     self.wasConnected=connected;
     JMSetLabel(self.statusLabel,status); JMSetLabel(self.loginStatus,status);
-    NSString *name=JMString(self.ownInfo[@"friendly"]);
-    [self.accountLabel setStringValue:connected && name.length ? [NSString stringWithFormat:@"%@ · UIN %@",name,self.accountUIN ?: client.uin ?: @""] : status];
-    [self.accountLabel setToolTip:self.accountLabel.stringValue];
+    [self updateAccountLabel];
     if (connected && [self.loginWindow isVisible]) { [self.loginWindow orderOut:nil]; [self.chatWindow makeKeyAndOrderFront:nil]; }
     [self updateSendButton]; [self updateTypingIndicator];
     if (connected) [self openPendingNotification];
+}
+- (void)updateAccountLabel {
+    NSString *uin=JMValidUIN(self.accountUIN) ? self.accountUIN : self.client.uin;
+    NSString *name=JMString(self.ownInfo[@"friendly"]);
+    NSString *identity=JMValidUIN(uin) ? (name.length ? [NSString stringWithFormat:@"%@ · UIN %@",name,uin] : [@"UIN " stringByAppendingString:uin]) : (name.length ? name : @"Учётная запись");
+    JMSetLabel(self.accountLabel,identity);
 }
 - (void)client:(JMAPIClient *)client failedLogin:(NSError *)error {
     BOOL savedAccount=[[self.loginDefaults stringForKey:@"RememberedAccountUIN"] isEqualToString:self.accountUIN];
@@ -1819,9 +1828,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.ownProfileController updateOwnInfo:self.ownInfo];
     NSString *state=JMString(self.ownInfo[@"state"]);
     for (NSMenuItem *item in [self.presencePopup itemArray]) if ([[item representedObject] isEqualToString:state]) { [self.presencePopup selectItem:item]; break; }
-    NSString *name=JMString(self.ownInfo[@"friendly"]);
-    if (name.length && client.connected) [self.accountLabel setStringValue:[NSString stringWithFormat:@"%@ · UIN %@",name,self.accountUIN ?: client.uin ?: @""]];
-    [self.accountLabel setToolTip:self.accountLabel.stringValue];
+    [self updateAccountLabel];
 }
 - (void)showOwnProfile:(id)sender {
     if (!JMValidUIN(self.accountUIN)) return;

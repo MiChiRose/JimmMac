@@ -452,6 +452,17 @@ int main(int argc, const char *argv[]) {
         client.fixtureConnected = YES;
         [delegate client:client receivedOwnInfo:@{@"friendly":@"Тестовый пользователь",@"state":@"online"}];
         [delegate client:client changedStatus:@"В сети · тестовые данные" connected:YES];
+        {
+            NSTextField *account=[delegate valueForKey:@"accountLabel"], *connection=[delegate valueForKey:@"statusLabel"];
+            NSString *identity=[account.stringValue copy];
+            CheckUI([identity rangeOfString:@"UIN"].location!=NSNotFound && ![identity isEqualToString:connection.stringValue],"account header and network footer show separate information");
+            [delegate client:client changedStatus:@"Нет соединения. Повтор через 2 с…" connected:NO];
+            CheckUI([account.stringValue isEqualToString:identity] && [connection.stringValue hasPrefix:@"Нет соединения"],"reconnection keeps account identity in header and network reason only in footer");
+            NSDictionary *own=[[delegate valueForKey:@"ownInfo"] copy]; [[delegate valueForKey:@"ownInfo"] removeAllObjects];
+            [delegate client:client changedStatus:@"Подключено" connected:YES];
+            CheckUI([account.stringValue hasPrefix:@"UIN "] && [connection.stringValue isEqualToString:@"Подключено"],"missing profile name shows UIN in header without repeating connection status");
+            [[delegate valueForKey:@"ownInfo"] addEntriesFromDictionary:own]; [delegate client:client changedStatus:@"Подключено" connected:YES];
+        }
         Capture(chat, [output stringByAppendingPathComponent:@"UI-contacts.png"]);
         [sections setSelectedSegment:1]; [delegate changeSection:nil];
         CheckUI([[delegate valueForKey:@"visibleContacts"] count] == 2, "conversations tab lists message peers only");
