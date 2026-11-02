@@ -1,132 +1,132 @@
 <div align="center">
-  <img src="Resources/ICQFlower.png" alt="JimmMac ICQ flower" width="112" />
+  <img src="Resources/ICQFlower.png" alt="Цветок ICQ — значок JimmMac" width="112" />
   <h1>JimmMac</h1>
-  <p><b>A familiar flower. An older Mac. A new conversation.</b></p>
+  <p><b>Знакомый цветок. Любимый Mac. Новый разговор.</b></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.12.0-5a9638" alt="Version 0.12.0" />
-    <img src="https://img.shields.io/badge/status-public%20testing-d59b35" alt="Public testing" />
-    <img src="https://img.shields.io/badge/OS%20X-10.8%E2%80%9310.13-silver" alt="Target: OS X 10.8 through macOS 10.13" />
-    <img src="https://img.shields.io/badge/architecture-Intel%20x86__64-687b8c" alt="Intel x86_64" />
+    <img src="https://img.shields.io/badge/версия-0.12.0-5a9638" alt="Версия 0.12.0" />
+    <img src="https://img.shields.io/badge/статус-открытое%20тестирование-d59b35" alt="Открытое тестирование" />
+    <img src="https://img.shields.io/badge/OS%20X-10.8%E2%80%9310.13-silver" alt="Целевые системы: OS X 10.8 — macOS 10.13" />
+    <img src="https://img.shields.io/badge/архитектура-Intel%20x86__64-687b8c" alt="Intel x86_64" />
   </p>
   <p>
-    <a href="https://github.com/MiChiRose/JimmMac/releases/latest"><b>Download JimmMac</b></a>
-    · <a href="https://github.com/MiChiRose/JimmMac/issues">Report a problem</a>
-    · <a href="docs/GUIDE.ru.md">Подробная инструкция на русском</a>
+    <a href="https://github.com/MiChiRose/JimmMac/releases/latest"><b>Скачать JimmMac</b></a>
+    · <a href="https://github.com/MiChiRose/JimmMac/issues">Сообщить о проблеме</a>
+    · <a href="docs/README.en.md">English version</a>
   </p>
 </div>
 
-## ICQ conversations, at home on a classic Mac
+## Переписка ICQ на привычном Mac
 
-JimmMac is an independent client for [Jimm.online](https://jimm.online), a service
-reviving ICQ-style messaging. It brings UIN sign-in, contacts and everyday text
-conversations to older Intel Macs, with native AppKit controls, silver panels,
-the green ICQ flower and familiar message sounds.
+JimmMac — независимый клиент [Jimm.online](https://jimm.online), сервиса,
+возрождающего общение в духе ICQ. Вход по UIN, контакты и повседневная переписка
+снова доступны на старых Intel Mac: с нативными элементами AppKit, серебристыми
+панелями, зелёным цветком ICQ и знакомыми звуками сообщений.
 
-The interface is currently in Russian. The application is written in Objective-C
-and uses one Intel build targeting **OS X 10.8 Mountain Lion through macOS 10.13
-High Sierra**. It is an independent project, not an official ICQ application.
+Интерфейс приложения — на русском языке. JimmMac написан на Objective-C;
+одна сборка Intel рассчитана на **OS X 10.8 Mountain Lion — macOS 10.13
+High Sierra**. Это самостоятельный проект, неофициальный клиент ICQ.
 
 <p align="center">
-  <img src="screenshots/UI-chat-polished.png" alt="JimmMac conversation on OS X Mavericks, using fictional contacts and messages" width="900" />
+  <img src="screenshots/UI-chat-polished.png" alt="Переписка JimmMac на OS X Mavericks с вымышленными контактами и сообщениями" width="900" />
 </p>
-<p align="center"><em>Native AppKit on Mavericks. Screenshot uses fictional conversations.</em></p>
+<p align="center"><em>Нативный AppKit на Mavericks. На снимке — вымышленная переписка.</em></p>
 
-## Download and install
+## Скачать и установить
 
-| Download | What to choose |
+| Загрузка | Что выбрать |
 | --- | --- |
-| [0.12.0 DMG installer](https://github.com/MiChiRose/JimmMac/releases/download/v0.12.0/JimmMac-0.12.0-macos10.8-10.13-x86_64.dmg) | Open the image and drag JimmMac into Applications. |
-| [0.12.0 application ZIP](https://github.com/MiChiRose/JimmMac/releases/download/v0.12.0/JimmMac-0.12.0-macos10.8-10.13-x86_64.zip) | The same application in a ZIP archive. |
-| [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.12.0) | Read about this version and verify your download. |
+| [Установочный DMG 0.12.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.12.0/JimmMac-0.12.0-macos10.8-10.13-x86_64.dmg) | Откройте образ и перетащите JimmMac в Applications («Программы»). |
+| [Приложение в ZIP 0.12.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.12.0/JimmMac-0.12.0-macos10.8-10.13-x86_64.zip) | То же приложение в ZIP-архиве. |
+| [Описание релиза и контрольные суммы SHA-256](https://github.com/MiChiRose/JimmMac/releases/tag/v0.12.0) | Узнайте об изменениях и проверьте скачанный файл. |
 
-Launch JimmMac from **Applications in Finder**. When updating, quit JimmMac before
-replacing it; keep your existing application data and settings. The application
-is not Developer ID signed or notarized. If Gatekeeper blocks the first launch,
-Control-click JimmMac and choose **Open**.
+Запускайте JimmMac из папки **«Программы» в Finder**. При обновлении завершите
+приложение перед заменой; сохраните существующие данные и настройки. Сборка
+не подписана сертификатом Developer ID и не нотариализована. Если Gatekeeper
+блокирует первый запуск, нажмите на JimmMac с зажатой Control и выберите **«Открыть»**.
 
-Use a **Jimm.online UIN and password** to sign in. If you need an account, start at
-[Jimm.online](https://jimm.online). Enable **«Запомнить меня»** to restore your login
-after restarting the application.
+Для входа нужны **UIN и пароль Jimm.online**. Если аккаунта ещё нет, начните
+с [Jimm.online](https://jimm.online). Включите **«Запомнить меня»**, чтобы вход
+восстанавливался после перезапуска приложения.
 
-## What you can do
+## Возможности
 
-- Keep **Contacts** and **Conversations** separate, find people by UIN, add contacts
-  and organize them into groups.
-- Send and receive text messages automatically, including offline messages, with
-  unread counts, typing indicators and reconnection after a network interruption.
-- Browse local history, search older messages, follow clickable links and reply
-  with a quote.
-- Leave a draft and return to it after restarting, with separate drafts for each
-  conversation and account.
-- View profiles and avatars, edit your own profile and photo, and change your
-  online status with server confirmation.
-- Adjust message fonts, sounds, notification previews and Enter-to-send behavior.
-- Use native keyboard shortcuts, including Command shortcuts with a Russian
-  keyboard layout. Open **«Справка → Сочетания клавиш…»** for the full reference.
+- Отдельные разделы **«Контакты»** и **«Переписки»**, поиск людей по UIN,
+  добавление контактов и распределение по группам.
+- Отправка и автоматическое получение текстовых сообщений, в том числе офлайн,
+  счётчики непрочитанных, индикатор набора и восстановление соединения после обрыва сети.
+- Локальная история, поиск старых сообщений, кликабельные ссылки и ответы с цитатой.
+- Черновики, которые возвращаются после перезапуска, отдельно для каждого
+  собеседника и аккаунта.
+- Профили и аватары собеседников, редактирование своего профиля и фотографии,
+  смена сетевого статуса с подтверждением сервера.
+- Настройки шрифта сообщений, звуков, содержимого уведомлений и отправки по Enter.
+- Нативные сочетания клавиш, включая команды с Command в русской раскладке.
+  Полный список доступен в **«Справка → Сочетания клавиш…»**.
 
 <details>
-<summary><b>A closer look: contacts, profile and sign-in</b></summary>
+<summary><b>Ещё несколько экранов: контакты, профиль и вход</b></summary>
 
 <p align="center">
-  <img src="screenshots/UI-contacts.png" alt="JimmMac contacts and group filter with fictional data" width="850" />
-  <img src="screenshots/UI-own-profile.png" alt="JimmMac profile editor with fictional account details" width="520" />
-  <img src="screenshots/UI-login.png" alt="JimmMac UIN sign-in window" width="520" />
+  <img src="screenshots/UI-contacts.png" alt="Контакты JimmMac и фильтр групп с вымышленными данными" width="850" />
+  <img src="screenshots/UI-own-profile.png" alt="Редактор профиля JimmMac с вымышленными данными аккаунта" width="520" />
+  <img src="screenshots/UI-login.png" alt="Окно входа JimmMac по UIN" width="520" />
 </p>
 
 </details>
 
-## New in 0.12.0
+## Новое в 0.12.0
 
-This release improves keyboard navigation, Escape and Enter behavior, undo/redo
-isolation and clipboard shortcuts. Incoming messages preserve selected history
-text so you can continue copying it. Account identity and connection status now
-have separate places in the window.
+Улучшены навигация с клавиатуры, поведение Escape и Enter, отмена и повтор правок,
+сочетания для работы с буфером обмена. История отмены разделена между переписками.
+Новые сообщения сохраняют выделенный текст истории, чтобы его можно было
+скопировать. Данные аккаунта и состояние соединения теперь находятся в разных
+частях окна.
 
-The classic green-and-silver appearance includes new About and keyboard-help
-windows. A decorated DMG provides drag-to-Applications installation. The network
-layer now selects an OS X 10.8 fallback at runtime, keeping one application for
-the full target range.
+Классическое зелёно-серебристое оформление дополнено окнами «О программе»
+и справки по клавиатуре. Для установки подготовлен оформленный DMG с перетаскиванием
+в «Программы». Сетевой слой автоматически выбирает совместимый путь для OS X 10.8,
+сохраняя одно приложение для всего целевого диапазона систем.
 
-[Read the 0.12.0 release notes](https://github.com/MiChiRose/JimmMac/releases/tag/v0.12.0).
+[Описание релиза 0.12.0](https://github.com/MiChiRose/JimmMac/releases/tag/v0.12.0).
 
-## Compatibility and testing
+## Совместимость и тестирование
 
-| System | Current verification |
+| Система | Что проверено |
 | --- | --- |
-| OS X 10.8 Mountain Lion | Build targets 10.8; fallback network path tested on Mavericks. A real 10.8 test is still needed. |
-| OS X 10.9 Mavericks | Tested on **10.9.5**, including installation, saved login, sending and automatic message reception. |
-| OS X 10.10–macOS 10.13 | Within the target range; tests on these systems are still needed. |
+| OS X 10.8 Mountain Lion | Минимальная система сборки — 10.8; совместимый сетевой путь проверен на Mavericks. Проверка на настоящей 10.8 ещё нужна. |
+| OS X 10.9 Mavericks | Проверено на **10.9.5**: установка, сохранённый вход, отправка и автоматическое получение сообщений. |
+| OS X 10.10 — macOS 10.13 | Входят в целевой диапазон; проверки на этих системах ещё нужны. |
 
-Version 0.12.0 is a **public testing build**. It passed 566 automated checks on
-Mavericks, covering both network paths, storage and the interface. The final
-application was built with Xcode 5.1.1 / SDK 10.9, with a minimum system of 10.8.
-Build compatibility does not replace testing on each actual system; differences
-in system TLS, certificates and rendering may still matter.
+Версия 0.12.0 предназначена для **открытого тестирования**. На Mavericks пройдено
+566 автоматических проверок обоих сетевых путей, хранения данных и интерфейса.
+Конечное приложение собрано Xcode 5.1.1 / SDK 10.9 с минимальной системой 10.8.
+Совместимость сборки не заменяет проверку на каждой системе: возможны различия
+в системном TLS, сертификатах и отрисовке интерфейса.
 
-If you test it, please [open an issue](https://github.com/MiChiRose/JimmMac/issues)
-with your OS version, JimmMac version, what you did and what happened. Installation,
-sign-in, automatic incoming messages and restarting with a saved login are useful
-first checks. Remove private conversation details from screenshots, and never
-include passwords or session tokens.
+Если тестируете приложение, [создайте issue](https://github.com/MiChiRose/JimmMac/issues):
+укажите версию системы и JimmMac, свои действия и полученный результат. Для начала
+полезно проверить установку, вход, автоматическое получение сообщений и повторный
+запуск с сохранённым входом. Убирайте личные данные из снимков экрана и не публикуйте
+пароли или токены сессии.
 
-## Your data
+## Ваши данные
 
-JimmMac does not save your password. Optional saved sign-in uses an expiring token
-in the system Keychain. **Cmd+Q** keeps that login; **«Выйти из аккаунта»** removes it.
+JimmMac не сохраняет пароль. При включённом сохранении входа токен с ограниченным
+сроком действия хранится в системной Связке ключей. **Cmd+Q** сохраняет этот вход,
+а **«Выйти из аккаунта»** удаляет его.
 
-Message history and drafts are stored locally under
-`~/Library/Application Support/JimmMac/`, separately for each account. These JSON
-files are **not encrypted**. Search runs against local history. Notification
-previews can be adjusted in Settings.
+История сообщений и черновики хранятся локально в
+`~/Library/Application Support/JimmMac/`, отдельно для каждого аккаунта.
+Эти JSON-файлы **не зашифрованы**. Поиск работает по локальной истории.
+Содержимое уведомлений можно изменить в настройках.
 
-[Detailed behavior and storage notes, in Russian](docs/GUIDE.ru.md#данные-и-сетевое-поведение).
+[Подробнее о данных и сетевом поведении](docs/GUIDE.ru.md#данные-и-сетевое-поведение).
 
-## Build and explore
+## Сборка и устройство проекта
 
-The repository includes the application source, resources and tests. The verified
-build environments are Xcode 5.1.1 / SDK 10.9 and Xcode 6.2 / SDK 10.10 on Mavericks.
-Current Xcode versions do not include the legacy ARC support needed for this
-deployment target.
+В репозитории находятся исходники приложения, ресурсы и тесты. Проверенные среды
+сборки — Xcode 5.1.1 / SDK 10.9 и Xcode 6.2 / SDK 10.10 на Mavericks. Современные
+версии Xcode не содержат поддержки ARC, необходимой для такой минимальной системы.
 
 ```sh
 git clone https://github.com/MiChiRose/JimmMac.git
@@ -135,22 +135,22 @@ bash scripts/test.sh
 bash scripts/build.sh
 ```
 
-Open `build/JimmMac.app` from Finder. UI checks are available through
-`bash scripts/ui-smoke.sh` and use fictional data.
+Откройте `build/JimmMac.app` из Finder. Проверки интерфейса запускаются через
+`bash scripts/ui-smoke.sh` и используют вымышленные данные.
 
-[Build, packaging and architecture guide](docs/GUIDE.ru.md)
-· [Verification record](VALIDATION.md)
-· [Jimm.online API documentation](https://jimm.online/developers)
+[Подробная инструкция: сборка, упаковка и архитектура](docs/GUIDE.ru.md)
+· [Результаты проверок](VALIDATION.md)
+· [Документация API Jimm.online](https://jimm.online/developers)
 
-## More life for older Macs
+## Больше возможностей для старых Mac
 
-If you also use Telegram, take a look at
-[Telegraphica for Mac](https://github.com/MiChiRose/telegraphica), our separate
-client for older Intel Macs. The same link is available inside JimmMac under
-**«Справка → Telegraphica для Mac…»** and in **«О JimmMac»**.
+Если вы также пользуетесь Telegram, посмотрите
+[Telegraphica для Mac](https://github.com/MiChiRose/telegraphica) — наш отдельный
+клиент для старых Intel Mac. Ссылка на него есть и внутри JimmMac:
+**«Справка → Telegraphica для Mac…»** и **«О JimmMac»**.
 
-JimmMac is developed by **Yura Menschikov**. Thanks to the author of Jimm.online
-for the service and API that make these conversations possible.
+JimmMac разрабатывает **Юра Меньшиков**. Спасибо автору Jimm.online за сервис
+и API, благодаря которым это общение стало возможным.
 
-<sub>ICQ branding, graphics and sounds belong to their respective owners.
-See <a href="Resources/ASSET-SOURCES.md">asset sources and attribution</a>.</sub>
+<sub>Бренд ICQ, графика и звуки принадлежат соответствующим правообладателям.
+См. <a href="Resources/ASSET-SOURCES.md">источники ресурсов и указание авторства</a>.</sub>
