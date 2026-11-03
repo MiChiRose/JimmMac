@@ -118,6 +118,9 @@
 - (void)changeAppearance:(id)sender;
 - (void)restoreBackupURL:(NSURL *)url manifest:(NSDictionary *)manifest;
 - (void)handleEscapeInWindow:(NSWindow *)window;
+- (void)insertClassicSmiley:(NSMenuItem *)sender;
+- (void)changeClassicFontSize:(NSMenuItem *)sender;
+- (void)filterHistoricalGroup:(NSMenuItem *)sender;
 - (BOOL)notificationAlerts:(JMNotificationAlerts *)alerts shouldNotifyPeer:(NSString *)peer;
 - (JMAvatarStore *)makeAvatarStore;
 - (void)startAutomaticLogin;
@@ -1312,6 +1315,7 @@ int main(int argc, const char *argv[]) {
 
 
             // Offline access, conversation mute and all three presentations share one account.
+            [delegate client:client receivedOwnInfo:@{@"friendly":@"Мария",@"state":@"online",@"statusMsg":@"На связи с друзьями"}];
             [delegate selectPeer:@"666"]; Draft(delegate,composer,@"Черновик для трёх оформлений");
             NSMenuItem *muteItem=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(toggleMuteConversation:) keyEquivalent:@""]; muteItem.representedObject=@"666";
             [delegate toggleMuteConversation:muteItem];
@@ -1327,15 +1331,54 @@ int main(int argc, const char *argv[]) {
                 NSWindow *roster=[delegate valueForKey:@"rosterWindow"]; BOOL historic=![theme isEqual:@"current"];
                 CheckUI([JMThemeIdentifier() isEqual:theme] && [composer.string isEqual:@"Черновик для трёх оформлений"],"theme switch preserves active account draft");
                 CheckUI([delegate valueForKey:@"contactTable"]!=nil && [(NSView *)[delegate valueForKey:@"contactTable"] window]==(historic ? roster : chat),"same native contact table is reparented to correct window");
-                [chat setContentSize:historic ? NSMakeSize(540,480) : NSMakeSize(860,560)];
-                if (historic) [roster setContentSize:NSMakeSize(268,580)];
+                [chat setContentSize:chat.contentMinSize];
+                if (historic) [roster setContentSize:roster.contentMinSize];
                 NSView *pane=[delegate valueForKey:@"chatPane"];
                 for (NSString *key in @[@"composer",@"sendButton",@"profileButton",@"historySearchButton",@"peerLabel",@"peerDetail"]) {
                     NSView *view=[delegate valueForKey:key]; NSRect frame=[pane convertRect:view.bounds fromView:view];
                     CheckUI(NSContainsRect(pane.bounds,frame),"conversation controls fit minimum themed window");
                 }
                 NSView *side=[delegate valueForKey:@"sidebar"];
-                CheckUI(NSContainsRect(side.bounds,sections.frame),"all contact and conversation tab labels fit historical roster");
+                CheckUI(NSContainsRect(sections.superview.bounds,sections.frame),"all contact and conversation tab labels fit historical roster");
+                (void)side;
+                if (historic) {
+                    for (NSString *key in @[@"themeSmileyButton",@"themeFontButton",@"themeCloseButton",@"themeComposerCount",@"themeConversationTabs",@"themeConversationPicker"]) { NSView *view=[delegate valueForKey:key]; if (!view.isHidden) CheckUI(NSContainsRect(pane.bounds,view.frame),"historical controls fit minimum chat size"); }
+                    CheckUI(!NSIntersectsRect([[delegate valueForKey:@"themeSmileyButton"] frame],composer.enclosingScrollView.frame),"smiley button is separate from editable text area");
+                    NSBitmapImageRep *buttonPixels=[send bitmapImageRepForCachingDisplayInRect:send.bounds]; [send cacheDisplayInRect:send.bounds toBitmapImageRep:buttonPixels];
+                    NSColor *buttonTop=[[buttonPixels colorAtX:7 y:3] colorUsingColorSpaceName:NSCalibratedRGBColorSpace], *buttonBottom=[[buttonPixels colorAtX:7 y:buttonPixels.pixelsHigh-4] colorUsingColorSpaceName:NSCalibratedRGBColorSpace];
+                    CGFloat topLight=buttonTop.redComponent+buttonTop.greenComponent+buttonTop.blueComponent, bottomLight=buttonBottom.redComponent+buttonBottom.greenComponent+buttonBottom.blueComponent;
+                    CheckUI(topLight>bottomLight+0.06,"reference button highlight is above its shadow in AppKit flipped coordinates");
+                    if ([theme isEqual:@"pro2003"]) {
+                        NSTextField *number=[delegate valueForKey:@"themeUINValue"], *nick=[delegate valueForKey:@"themeNickValue"], *numberTitle=[delegate valueForKey:@"themeUINTitle"];
+                        CheckUI([number.stringValue isEqual:@"666"] && !number.isEditable && number.isSelectable && [nick.stringValue isEqual:@"Анна"],"classic recipient fields expose real selectable read-only values");
+                        CheckUI(NSWidth(numberTitle.frame)>=[numberTitle.cell cellSize].width && !NSIntersectsRect(number.frame,nick.frame),"ICQ label and sunken recipient fields fit without clipping or overlap");
+                        NSArray *saved=PreserveClipboard();
+                        @try { [chat makeFirstResponder:number]; [number selectText:nil]; KeyInWindow(chat,@"c",NSCommandKeyMask,8); CheckUI([[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqual:@"666"],"Cmd+C copies the full UIN from classic recipient field"); } @finally { RestoreClipboard(saved); }
+                        [chat makeFirstResponder:composer];
+                        JMChatPreferences *preferences=[delegate valueForKey:@"chatPreferences"]; CGFloat oldSize=preferences.size; NSMenuItem *size=[[NSMenuItem alloc] init]; size.representedObject=@16; [delegate changeClassicFontSize:size];
+                        CheckUI(preferences.size==16 && composer.font.pointSize==16 && [composer.string isEqual:@"Черновик для трёх оформлений"],"classic font menu changes real font without altering draft"); size.representedObject=@(oldSize); [delegate changeClassicFontSize:size];
+                    }
+                    NSMenuItem *smiley=[[NSMenuItem alloc] initWithTitle:@":)" action:@selector(insertClassicSmiley:) keyEquivalent:@""]; smiley.representedObject=@":)";
+                    [composer.undoManager removeAllActions]; [delegate insertClassicSmiley:smiley];
+                    CheckUI([composer.string hasSuffix:@":)"] && composer.undoManager.canUndo,"classic smiley action inserts editable text with native undo");
+                    [app sendAction:@selector(undo:) to:nil from:nil]; CheckUI([composer.string isEqual:@"Черновик для трёх оформлений"],"native Cmd+Z restores draft after themed smiley insertion");
+                    if ([theme isEqual:@"mac2011"]) {
+                        NSMenu *groups=[delegate valueForKey:@"themeGroupMenu"]; NSMenuItem *chosen=nil; for (NSMenuItem *item in groups.itemArray) if ([item.representedObject isEqual:@"Тест"]) chosen=item;
+                        CheckUI(chosen!=nil,"Mac 2011 compact menu exposes actual server contact groups"); [app sendAction:chosen.action to:chosen.target from:chosen];
+                        CheckUI([[delegate valueForKey:@"selectedGroup"] isEqual:@"Тест"] && [composer.string isEqual:@"Черновик для трёх оформлений"],"compact group menu filters contacts without changing draft"); NSMenuItem *all=[groups itemAtIndex:0]; [app sendAction:all.action to:all.target from:all];
+                        NSSegmentedControl *tabs=[delegate valueForKey:@"themeConversationTabs"]; NSArray *tabPeers=[delegate valueForKey:@"themeTabPeers"]; NSUInteger index=[tabPeers indexOfObject:@"777"];
+                        CheckUI(index!=NSNotFound && tabs.segmentCount==3,"Mac 2011 tabs expose actual open conversations");
+                        [tabs setSelectedSegment:index]; [app sendAction:tabs.action to:tabs.target from:tabs];
+                        CheckUI([[delegate valueForKey:@"selectedPeer"] isEqual:@"777"],"Mac 2011 conversation tab opens its actual peer"); [delegate selectPeer:@"666"];
+                        [chat setContentSize:NSMakeSize(680,560)]; [chat setContentSize:chat.contentMinSize];
+                        CheckUI([linkedTranscript.textStorage attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:NULL]!=nil && [composer.string isEqual:@"Черновик для трёх оформлений"],"resizing the Mac 2011 message blocks preserves editable draft");
+                    } else {
+                        NSButton *close=[delegate valueForKey:@"themeCloseButton"]; [chat makeFirstResponder:close]; KeyInWindow(chat,@" ",0,49);
+                        CheckUI(!chat.isVisible && [composer.string isEqual:@"Черновик для трёх оформлений"],"Space activates skinned Close button and preserves draft"); [delegate selectPeer:@"666"];
+                        NSView *latest=[delegate valueForKey:@"latestMessagesButton"];
+                        CheckUI(!NSIntersectsRect(latest.frame,composer.enclosingScrollView.frame),"classic new-message action does not cover input field");
+                    }
+                }
                 NSView *next=[delegate valueForKey:@"presencePopup"];
                 for (NSUInteger j=0;j<20 && next;j++,next=next.nextKeyView) CheckUI(next.window==(historic ? roster : chat),"Tab loop stays within the roster window");
                 if (historic) {
@@ -1343,6 +1386,9 @@ int main(int argc, const char *argv[]) {
                     CheckUI(roster.isKeyWindow && roster.firstResponder==[delegate valueForKey:@"contactTable"],"Escape from historic chat focuses roster without losing draft");
                     Capture(roster,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"UI-%@-contacts.png",theme]]);
                 }
+                NSClipView *themeClip=linkedTranscript.enclosingScrollView.contentView; NSPoint themeOrigin=linkedTranscript.textContainerOrigin;
+                NSRange visibleGlyphs=[linkedTranscript.layoutManager glyphRangeForBoundingRect:NSOffsetRect(themeClip.bounds,-themeOrigin.x,-themeOrigin.y) inTextContainer:linkedTranscript.textContainer];
+                CheckUI(visibleGlyphs.length>0,"resizing and switching themes keeps actual message glyphs in the viewport");
                 Capture(chat,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"UI-%@-conversation.png",theme]]);
             }
             [delegate flushDrafts]; client.fixtureConnected=NO; FakeLoginStore *offlineLogin=[delegate valueForKey:@"loginStore"]; NSUInteger offlineReads=offlineLogin.reads, offlineRemovals=offlineLogin.removals;
@@ -1384,6 +1430,12 @@ int main(int argc, const char *argv[]) {
             NSWindow *englishChat=[english valueForKey:@"chatWindow"]; [englishChat setContentSize:NSMakeSize(860,560)];
             CheckUI(NSWidth(englishSections.frame)>=[[englishSections cell] cellSize].width,"English tab labels fit the smallest window");
             Capture(englishChat,[output stringByAppendingPathComponent:@"UI-English-offline.png"]);
+            for (NSString *mode in @[@"pro2003",@"mac2011"]) {
+                NSMenuItem *item=[[NSMenuItem alloc] init]; item.representedObject=mode; [english changeAppearance:item]; [englishChat setContentSize:englishChat.contentMinSize];
+                if ([mode isEqual:@"pro2003"]) { NSTextField *nick=[english valueForKey:@"themeNickTitle"]; CheckUI([nick.stringValue isEqual:@"Nick:"] && NSWidth(nick.frame)>=[nick.cell cellSize].width,"English classic nickname label fits without truncating First name"); }
+                Capture(englishChat,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"UI-English-%@.png",mode]]);
+            }
+            NSMenuItem *back=[[NSMenuItem alloc] init]; back.representedObject=@"current"; [english changeAppearance:back]; [[english valueForKey:@"rosterWindow"] orderOut:nil];
             [englishLogin orderOut:nil]; [[english valueForKey:@"chatWindow"] orderOut:nil];
             JMSetLanguage(@"ru"); [testAlertDefaults setObject:@"ru" forKey:@"InterfaceLanguage"]; [app setDelegate:delegate];
 

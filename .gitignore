@@ -2,6 +2,8 @@
 build/
 build-dev/
 build-dev-tests/
+build-design/
+build-design-tests/
 build-update/
 build-compat/
 build-verify/

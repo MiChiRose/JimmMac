@@ -75,9 +75,9 @@ after restarting the application.
 
 </details>
 
-## New in 0.14.0
+## New in 0.14
 
-The `main` branch contains testing version **0.14.0**. The latest published
+The `main` branch contains testing version **0.14.2**. The latest published
 release in the downloads section is **0.12.0**; the features below apply to 0.14 source.
 
 - **Three appearances.** View → Appearance: Current, Nostalgia · ICQ for Mac 2011,
@@ -100,12 +100,23 @@ release in the downloads section is **0.12.0**; the features below apply to 0.14
 - **Russian and English.** View → Interface Language. Restart normally from Finder
   to apply the language to menus, windows, app messages and tooltips.
 
+### Reference-based appearance in 0.14.2
+
+Button and tab shapes, thin edges, corner radii and highlight direction follow
+the selected references. The Mac 2011 header and Pro button gradients use sRGB
+samples from those images. Pro has separate UIN and nickname fields, a dense
+roster and a compact send bar. Mac 2011 uses a status speech bubble, icon
+navigation, right-hand avatars, conversation tabs with status icons, and message
+blocks with right-aligned timestamps. Group filtering is in the navigation menu.
+
+[Sources and rendering measurements](HISTORICAL-REFERENCE.md).
+
 <table><tr>
 <td><img src="../screenshots/UI-mac2011-contacts.png" alt="ICQ for Mac 2011 appearance, fictional contacts" width="268" /></td>
 <td><img src="../screenshots/UI-pro2003-contacts.png" alt="ICQ Pro 2003b appearance, fictional contacts" width="268" /></td>
 </tr></table>
 
-Runtime checks use **OS X 10.9.5**. All 806 automated checks and coverage checks for 505 RU/EN strings pass. Actual runs on 10.8 and 10.13 remain pending:
+Runtime checks use **OS X 10.9.5**. All 835 automated checks and coverage checks for 514 RU/EN strings pass. Actual runs on 10.8 and 10.13 remain pending:
 those systems are currently unavailable. One build retains the 10.8 deployment target.
 
 ## New in 0.13.0

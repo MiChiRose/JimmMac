@@ -20,8 +20,30 @@ NSColor *JMLegacyHeaderBottomColor(void);
 - (void)setHasPeer:(BOOL)hasPeer;
 @end
 @interface JMListCell : NSTableCellView
+@property(nonatomic,copy) NSString *groupTitle;
+- (CGFloat)groupHeaderHeight;
 - (void)configureName:(NSString *)name detail:(NSString *)detail state:(NSString *)state unread:(NSInteger)unread;
 - (void)setAvatar:(NSImage *)image;
 - (void)setTimestamp:(NSString *)timestamp draft:(BOOL)draft;
 - (void)setTimestampTooltip:(NSString *)tooltip;
+@end
+// Rendering stays in native AppKit cells: tracking, menus, focus and accessibility remain native.
+@interface JMThemedButton : NSButton
+@end
+@interface JMThemedButtonCell : NSButtonCell
+@end
+@interface JMThemedPopUpButton : NSPopUpButton
+@end
+@interface JMThemedSegmentedCell : NSSegmentedCell
+@end
+@interface JMConversationChrome : JMChromeView
+@end
+@interface JMRosterChrome : JMChromeView
+@end
+NSImage *JMClassicToolbarImage(NSString *name);
+@interface JMThemedSearchField : NSSearchField
+@end
+@interface JMClassicSendBar : NSView
+@end
+@interface JMClassicAvatarView : NSImageView
 @end

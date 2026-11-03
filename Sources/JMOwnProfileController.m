@@ -1,6 +1,8 @@
 #import "JMLocalization.h"
 #import "JMOwnProfileController.h"
 #import "JMKeyboard.h"
+#import "JMStyle.h"
+#import "JMTheme.h"
 #import "JMAPIClient.h"
 #import "JMAvatarStore.h"
 #import "JMProtocol.h"
@@ -9,7 +11,7 @@
 @interface JMProfileBackgroundView : NSView
 @end
 @implementation JMProfileBackgroundView
-- (void)drawRect:(NSRect)dirtyRect { [[NSColor windowBackgroundColor] setFill]; NSRectFill(dirtyRect); }
+- (void)drawRect:(NSRect)dirtyRect { [JMThemeBackground() setFill]; NSRectFill(dirtyRect); }
 @end
 
 static NSTextField *Label(NSString *text, NSRect frame, CGFloat size, BOOL bold) {
@@ -19,7 +21,7 @@ static NSTextField *Label(NSString *text, NSRect frame, CGFloat size, BOOL bold)
     [[field cell] setLineBreakMode:NSLineBreakByTruncatingTail]; field.toolTip=text; return field;
 }
 static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
-    NSButton *button=[[NSButton alloc] initWithFrame:frame]; button.title=title; button.bezelStyle=NSRoundedBezelStyle;
+    NSButton *button=[[JMThemedButton alloc] initWithFrame:frame]; button.title=title; button.bezelStyle=NSRoundedBezelStyle;
     button.target=target; button.action=action; button.toolTip=title; return button;
 }
 @interface JMOwnProfileController ()

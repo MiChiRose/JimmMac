@@ -2,6 +2,7 @@
 #import "JMInformationController.h"
 #import "JMKeyboard.h"
 #import "JMStyle.h"
+#import "JMTheme.h"
 #import <float.h>
 
 NSURL *JMTelegraphicaURL(void) { return [NSURL URLWithString:@"https://github.com/MiChiRose/telegraphica"]; }
@@ -9,7 +10,7 @@ NSURL *JMTelegraphicaURL(void) { return [NSURL URLWithString:@"https://github.co
 @end
 @implementation JMInformationBackground
 - (BOOL)isOpaque { return YES; }
-- (void)drawRect:(NSRect)rect { [[NSColor windowBackgroundColor] setFill]; NSRectFill(rect); }
+- (void)drawRect:(NSRect)rect { [JMThemeBackground() setFill]; NSRectFill(rect); }
 @end
 static NSTextField *Label(NSString *text, NSRect frame, CGFloat size, BOOL bold) {
     NSTextField *field=[[NSTextField alloc] initWithFrame:frame]; field.stringValue=text; field.editable=NO; field.selectable=YES;
@@ -17,7 +18,7 @@ static NSTextField *Label(NSString *text, NSRect frame, CGFloat size, BOOL bold)
     [[field cell] setWraps:YES]; [[field cell] setLineBreakMode:NSLineBreakByWordWrapping]; field.toolTip=text; return field;
 }
 static NSButton *Button(NSString *text, NSRect frame, id target, SEL action) {
-    NSButton *button=[[NSButton alloc] initWithFrame:frame]; button.title=text; button.bezelStyle=NSRoundedBezelStyle;
+    NSButton *button=[[JMThemedButton alloc] initWithFrame:frame]; button.title=text; button.bezelStyle=NSRoundedBezelStyle;
     button.target=target; button.action=action; button.toolTip=text; return button;
 }
 @implementation JMInformationController
@@ -31,7 +32,7 @@ static NSButton *Button(NSString *text, NSRect frame, id target, SEL action) {
     JMChromeView *header=[[JMChromeView alloc] initWithFrame:NSMakeRect(0,height-96,560,96)];
     header.topColor=JMLegacyHeaderTopColor(); header.bottomColor=JMLegacyHeaderBottomColor(); [root addSubview:header];
     NSImageView *flower=[[NSImageView alloc] initWithFrame:NSMakeRect(24,20,56,56)]; flower.image=JMFlowerImage(); flower.imageScaling=NSImageScaleProportionallyUpOrDown; [header addSubview:flower];
-    NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.14.0";
+    NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.14.2";
     [header addSubview:Label(keyboardHelp ? JML(@"JimmMac с клавиатуры") : [@"JimmMac " stringByAppendingString:version],NSMakeRect(96,48,438,28),21,YES)];
     [header addSubview:Label(JML(@"Ваша аська на Mac · Jimm.online"),NSMakeRect(97,22,438,20),12,NO)];
     if (keyboardHelp) {
