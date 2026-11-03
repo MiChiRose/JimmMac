@@ -1,3 +1,4 @@
+#import "JMLocalization.h"
 #import "JMOwnProfileController.h"
 #import "JMKeyboard.h"
 #import "JMAPIClient.h"
@@ -60,28 +61,28 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     NSWindow *window=[[JMWindow alloc] initWithContentRect:NSMakeRect(0,0,520,644) styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
     self=[super initWithWindow:window]; if (!self) return nil;
     self.client=client; self.avatars=avatars; self.account=uin;
-    window.title=@"Мой профиль — JimmMac"; window.releasedWhenClosed=NO; window.delegate=self;
+    window.title=JML(@"Мой профиль — JimmMac"); window.releasedWhenClosed=NO; window.delegate=self;
     window.contentView=[[JMProfileBackgroundView alloc] initWithFrame:NSMakeRect(0,0,520,644)];
     NSView *root=window.contentView;
     self.avatar=[[NSImageView alloc] initWithFrame:NSMakeRect(24,528,80,80)]; self.avatar.imageScaling=NSImageScaleProportionallyUpOrDown;
-    self.avatar.toolTip=@"Ваш аватар в Jimm.online"; [root addSubview:self.avatar];
-    self.name=Label(@"Мой профиль",NSMakeRect(120,582,376,27),18,YES); [root addSubview:self.name];
+    self.avatar.toolTip=JML(@"Ваш аватар в Jimm.online"); [root addSubview:self.avatar];
+    self.name=Label(JML(@"Мой профиль"),NSMakeRect(120,582,376,27),18,YES); [root addSubview:self.name];
     [root addSubview:Label([NSString stringWithFormat:@"UIN %@",uin],NSMakeRect(120,560,376,22),12,NO)];
-    self.chooseButton=Button(@"Выбрать фото…",NSMakeRect(114,521,164,30),self,@selector(chooseAvatar:));
-    self.chooseButton.toolTip=@"Выбрать JPEG, PNG или GIF с этого Mac. Загрузка начнётся после «Сохранить»"; [root addSubview:self.chooseButton];
-    self.revertButton=Button(@"Отменить выбор",NSMakeRect(282,521,162,30),self,@selector(revertAvatar:)); [root addSubview:self.revertButton];
-    [root addSubview:Label(@"Квадрат из центра фото · до 256 × 256 · JPEG до 64 КБ",NSMakeRect(24,491,472,20),11,NO)];
-    [root addSubview:Label(@"Имя",NSMakeRect(24,456,224,20),13,YES)];
-    [root addSubview:Label(@"Фамилия",NSMakeRect(268,456,228,20),13,YES)];
+    self.chooseButton=Button(JML(@"Выбрать фото…"),NSMakeRect(114,521,164,30),self,@selector(chooseAvatar:));
+    self.chooseButton.toolTip=JML(@"Выбрать JPEG, PNG или GIF с этого Mac. Загрузка начнётся после «Сохранить»"); [root addSubview:self.chooseButton];
+    self.revertButton=Button(JML(@"Отменить выбор"),NSMakeRect(282,521,162,30),self,@selector(revertAvatar:)); [root addSubview:self.revertButton];
+    [root addSubview:Label(JML(@"Квадрат из центра фото · до 256 × 256 · JPEG до 64 КБ"),NSMakeRect(24,491,472,20),11,NO)];
+    [root addSubview:Label(JML(@"Имя"),NSMakeRect(24,456,224,20),13,YES)];
+    [root addSubview:Label(JML(@"Фамилия"),NSMakeRect(268,456,228,20),13,YES)];
     self.firstNameField=[[NSTextField alloc] initWithFrame:NSMakeRect(24,426,224,25)]; self.firstNameField.delegate=self; self.firstNameField.font=[NSFont systemFontOfSize:13];
-    self.firstNameField.toolTip=@"Имя в общедоступной анкете: до 128 символов, без переносов строки"; [root addSubview:self.firstNameField];
+    self.firstNameField.toolTip=JML(@"Имя в общедоступной анкете: до 128 символов, без переносов строки"); [root addSubview:self.firstNameField];
     self.lastNameField=[[NSTextField alloc] initWithFrame:NSMakeRect(268,426,228,25)]; self.lastNameField.delegate=self; self.lastNameField.font=[NSFont systemFontOfSize:13];
-    self.lastNameField.toolTip=@"Фамилия в общедоступной анкете: до 128 символов, без переносов строки"; [root addSubview:self.lastNameField];
-    [root addSubview:Label(@"Подпись статуса",NSMakeRect(24,373,472,20),13,YES)];
+    self.lastNameField.toolTip=JML(@"Фамилия в общедоступной анкете: до 128 символов, без переносов строки"); [root addSubview:self.lastNameField];
+    [root addSubview:Label(JML(@"Подпись статуса"),NSMakeRect(24,373,472,20),13,YES)];
     self.statusField=[[NSTextField alloc] initWithFrame:NSMakeRect(24,343,472,25)]; self.statusField.delegate=self;
-    self.statusField.font=[NSFont systemFontOfSize:13]; self.statusField.toolTip=@"Подпись под вашим именем: до 256 символов. Пустое поле убирает подпись. X-статус сохраняется";
+    self.statusField.font=[NSFont systemFontOfSize:13]; self.statusField.toolTip=JML(@"Подпись под вашим именем: до 256 символов. Пустое поле убирает подпись. X-статус сохраняется");
     [root addSubview:self.statusField];
-    [root addSubview:Label(@"О себе",NSMakeRect(24,307,472,20),13,YES)];
+    [root addSubview:Label(JML(@"О себе"),NSMakeRect(24,307,472,20),13,YES)];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(24,149,472,150)];
     scroll.borderType=NSBezelBorder; scroll.hasVerticalScroller=YES;
     self.about=[[JMFormTextView alloc] initWithFrame:scroll.contentView.bounds]; self.about.delegate=self;
@@ -89,15 +90,15 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     self.about.verticallyResizable=YES; self.about.horizontallyResizable=NO; self.about.maxSize=NSMakeSize(FLT_MAX,FLT_MAX);
     self.about.textContainer.containerSize=NSMakeSize(NSWidth(scroll.contentView.bounds),FLT_MAX);
     self.about.textContainer.widthTracksTextView=YES; self.about.autoresizingMask=NSViewWidthSizable; self.about.textContainerInset=NSMakeSize(6,6);
-    self.about.toolTip=@"Общедоступный текст профиля: не больше 4096 байт UTF-8. Пустой текст очищает профиль";
+    self.about.toolTip=JML(@"Общедоступный текст профиля: не больше 4096 байт UTF-8. Пустой текст очищает профиль");
     scroll.documentView=self.about; [root addSubview:scroll];
     self.counter=Label(@"",NSMakeRect(24,124,472,20),11,NO); [root addSubview:self.counter];
     self.feedback=Label(@"",NSMakeRect(24,55,472,60),12,NO); [[self.feedback cell] setWraps:YES]; [[self.feedback cell] setLineBreakMode:NSLineBreakByWordWrapping]; [root addSubview:self.feedback];
-    self.reloadButton=Button(@"Обновить",NSMakeRect(18,16,116,30),self,@selector(loadProfile:)); self.reloadButton.toolTip=@"Перечитать профиль и аватар с сервера. Сначала сохраните изменения или закройте окно"; [root addSubview:self.reloadButton];
-    self.closeButton=Button(@"Закрыть",NSMakeRect(272,16,108,30),self,@selector(closeEditor:)); self.closeButton.keyEquivalent=@"\e"; [root addSubview:self.closeButton];
-    self.saveButton=Button(@"Сохранить",NSMakeRect(382,16,120,30),self,@selector(saveProfile:));
+    self.reloadButton=Button(JML(@"Обновить"),NSMakeRect(18,16,116,30),self,@selector(loadProfile:)); self.reloadButton.toolTip=JML(@"Перечитать профиль и аватар с сервера. Сначала сохраните изменения или закройте окно"); [root addSubview:self.reloadButton];
+    self.closeButton=Button(JML(@"Закрыть"),NSMakeRect(272,16,108,30),self,@selector(closeEditor:)); self.closeButton.keyEquivalent=@"\e"; [root addSubview:self.closeButton];
+    self.saveButton=Button(JML(@"Сохранить"),NSMakeRect(382,16,120,30),self,@selector(saveProfile:));
     self.saveButton.keyEquivalent=@"s"; self.saveButton.keyEquivalentModifierMask=NSCommandKeyMask;
-    self.saveButton.toolTip=@"Сохранить изменённые поля и выбранную фотографию в Jimm.online (Cmd+S)"; [root addSubview:self.saveButton];
+    self.saveButton.toolTip=JML(@"Сохранить изменённые поля и выбранную фотографию в Jimm.online (Cmd+S)"); [root addSubview:self.saveButton];
     [self.firstNameField setNextKeyView:self.lastNameField]; [self.lastNameField setNextKeyView:self.statusField];
     [self.statusField setNextKeyView:self.about]; [self.about setNextKeyView:self.saveButton];
     [window center]; [self updateControls]; return self;
@@ -117,7 +118,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     self.saveButton.enabled=editable && self.client.connected && [self dirty] && [self validInput];
     self.closeButton.enabled=!self.busy;
     NSUInteger bytes=[self.about.string lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
-    self.counter.stringValue=[NSString stringWithFormat:@"О себе: %lu / 4096 байт UTF-8 · Подпись: %lu / 256",(unsigned long)bytes,(unsigned long)self.statusField.stringValue.length];
+    self.counter.stringValue=[NSString stringWithFormat:JML(@"О себе: %lu / 4096 байт UTF-8 · Подпись: %lu / 256"),(unsigned long)bytes,(unsigned long)self.statusField.stringValue.length];
     self.counter.textColor=[self validInput] ? [NSColor controlTextColor] : [NSColor redColor];
     self.counter.toolTip=self.counter.stringValue;
 }
@@ -132,25 +133,25 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
 }
 - (void)avatarUpdated { if (!self.pendingAvatar) self.avatar.image=[self.avatars imageForUIN:self.account] ?: [NSImage imageNamed:NSImageNameUser]; }
 - (void)connectionChanged {
-    if (!self.client.connected && self.window.isVisible && !self.busy) [self showFeedback:@"Нет соединения. Черновик остаётся в окне; сохранить можно после подключения."];
+    if (!self.client.connected && self.window.isVisible && !self.busy) [self showFeedback:JML(@"Нет соединения. Черновик остаётся в окне; сохранить можно после подключения.")];
     [self updateControls];
 }
 - (void)loadProfile:(id)sender {
     if (self.busy || [self dirty] || self.invalidated) return;
     if (!self.client.connected) { [self connectionChanged]; return; }
-    self.busy=YES; [self showFeedback:@"Загружаем профиль…"]; [self updateControls];
+    self.busy=YES; [self showFeedback:JML(@"Загружаем профиль…")]; [self updateControls];
     NSUInteger generation=++self.generation;
     __weak JMOwnProfileController *weakSelf=self;
     [self.client fetchProfileForUIN:self.account completion:^(NSDictionary *profile,NSError *error) {
         JMOwnProfileController *self=weakSelf; if (!self) return;
         if (self.invalidated || self.generation!=generation) return;
-        if (error || ![profile[@"profile"] isKindOfClass:[NSString class]]) { self.busy=NO; [self showFeedback:[@"Не удалось загрузить профиль. " stringByAppendingString:error.localizedDescription ?: @"Сервер не вернул текст профиля. Нажмите «Обновить»."]]; [self updateControls]; return; }
+        if (error || ![profile[@"profile"] isKindOfClass:[NSString class]]) { self.busy=NO; [self showFeedback:[JML(@"Не удалось загрузить профиль. ") stringByAppendingString:error.localizedDescription ?: JML(@"Сервер не вернул текст профиля. Нажмите «Обновить».")]]; [self updateControls]; return; }
         NSString *text=JMString(profile[@"profile"]);
         [self.client fetchPresenceForUIN:self.account completion:^(NSDictionary *presence,NSError *readError) {
             JMOwnProfileController *self=weakSelf; if (!self) return;
             if (self.invalidated || self.generation!=generation) return;
             NSDictionary *own=[self ownUser:presence]; self.busy=NO;
-            if (readError || !own) { [self showFeedback:@"Не удалось загрузить подпись статуса. Нажмите «Обновить», чтобы повторить."]; [self updateControls]; return; }
+            if (readError || !own) { [self showFeedback:JML(@"Не удалось загрузить подпись статуса. Нажмите «Обновить», чтобы повторить.")]; [self updateControls]; return; }
             self.busy=YES;
             [self.client fetchOwnDirectoryProfile:^(NSDictionary *directory,NSError *directoryError) {
                 JMOwnProfileController *self=weakSelf; if (!self || self.invalidated || self.generation!=generation) return;
@@ -162,7 +163,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
                 self.about.string=text; self.statusField.stringValue=self.originalStatus; self.loaded=YES;
                 [self.about.undoManager removeAllActions]; [self updateOwnInfo:own];
                 [self.avatars refreshUIN:self.account]; [self avatarUpdated];
-                [self showFeedback:@"Изменения будут видны другим пользователям после сохранения."]; [self updateControls];
+                [self showFeedback:JML(@"Изменения будут видны другим пользователям после сохранения.")]; [self updateControls];
             }];
         }];
     }];
@@ -174,21 +175,21 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
 - (void)controlTextDidChange:(NSNotification *)note { [self edited]; }
 - (void)textDidChange:(NSNotification *)note { [self edited]; }
 - (void)edited {
-    NSString *invalid=(!JMValidRosterName(self.firstNameField.stringValue,YES) || !JMValidRosterName(self.lastNameField.stringValue,YES)) ? @"Имя и фамилия: до 128 символов каждое, без переносов строки." : @"Сократите текст до указанного лимита. Подпись должна быть в одну строку.";
-    [self showFeedback:[self validInput] ? ([self dirty] ? @"Есть несохранённые изменения." : @"Изменений нет.") : invalid];
+    NSString *invalid=(!JMValidRosterName(self.firstNameField.stringValue,YES) || !JMValidRosterName(self.lastNameField.stringValue,YES)) ? JML(@"Имя и фамилия: до 128 символов каждое, без переносов строки.") : JML(@"Сократите текст до указанного лимита. Подпись должна быть в одну строку.");
+    [self showFeedback:[self validInput] ? ([self dirty] ? JML(@"Есть несохранённые изменения.") : JML(@"Изменений нет.")) : invalid];
     [self updateControls];
 }
 - (void)chooseAvatar:(id)sender {
     if (!self.loaded || self.busy || self.invalidated) return;
     self.filePanel=[NSOpenPanel openPanel]; self.filePanel.allowedFileTypes=@[@"jpg",@"jpeg",@"png",@"gif"];
     self.filePanel.allowsMultipleSelection=NO; self.filePanel.canChooseDirectories=NO; self.filePanel.canChooseFiles=YES;
-    self.filePanel.title=@"Фото профиля"; self.filePanel.prompt=@"Выбрать";
+    self.filePanel.title=JML(@"Фото профиля"); self.filePanel.prompt=JML(@"Выбрать");
     [self.filePanel beginSheetModalForWindow:self.window completionHandler:^(NSInteger result) {
         NSURL *url=self.filePanel.URL; self.filePanel=nil;
         if (result!=NSFileHandlingPanelOKButton || self.invalidated) return;
         NSNumber *size=nil, *regular=nil; [url getResourceValue:&size forKey:NSURLFileSizeKey error:NULL]; [url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];
-        if (!regular.boolValue || !size || size.unsignedLongLongValue>20*1024*1024) { [self showFeedback:@"Выберите обычный файл JPEG, PNG или GIF до 20 МБ."]; return; }
-        self.busy=YES; [self showFeedback:@"Готовим фотографию…"]; [self updateControls];
+        if (!regular.boolValue || !size || size.unsignedLongLongValue>20*1024*1024) { [self showFeedback:JML(@"Выберите обычный файл JPEG, PNG или GIF до 20 МБ.")]; return; }
+        self.busy=YES; [self showFeedback:JML(@"Готовим фотографию…")]; [self updateControls];
         NSUInteger generation=self.generation;
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT,0),^{
             NSError *error=nil; NSData *data=[NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:&error];
@@ -197,7 +198,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
                 if (self.invalidated || self.generation!=generation) return;
                 self.busy=NO;
                 if (jpeg) [self stageAvatar:jpeg];
-                else { [self showFeedback:error.localizedDescription ?: @"Не удалось прочитать фотографию."]; [self updateControls]; }
+                else { [self showFeedback:error.localizedDescription ?: JML(@"Не удалось прочитать фотографию.")]; [self updateControls]; }
             });
         });
     }];
@@ -205,14 +206,14 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
 - (void)stageAvatar:(NSData *)jpeg {
     NSImage *image=JMDecodeAvatar(jpeg); if (!image || self.invalidated) return;
     self.pendingAvatar=jpeg; self.avatar.image=image;
-    [self showFeedback:@"Предпросмотр нового аватара. Нажмите «Сохранить», чтобы загрузить его в Jimm.online."]; [self updateControls];
+    [self showFeedback:JML(@"Предпросмотр нового аватара. Нажмите «Сохранить», чтобы загрузить его в Jimm.online.")]; [self updateControls];
 }
 - (void)revertAvatar:(id)sender { self.pendingAvatar=nil; [self avatarUpdated]; [self edited]; }
 - (void)saveProfile:(id)sender {
     [self.window makeFirstResponder:nil];
     if (!self.loaded || self.busy || self.invalidated || ![self dirty] || ![self validInput] || !self.client.connected) { self.closeAfterSave=NO; [self updateControls]; return; }
     self.busy=YES; self.savedCount=0; self.wroteAbout=NO; self.wroteStatus=NO; self.wroteNames=NO; self.writtenNameKeys=nil;
-    [self showFeedback:@"Сохраняем изменения…"]; [self updateControls]; [self saveNext];
+    [self showFeedback:JML(@"Сохраняем изменения…")]; [self updateControls]; [self saveNext];
 }
 - (void)saveNext {
     if (self.invalidated) return;
@@ -253,11 +254,11 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
 }
 - (void)saveFailed:(NSError *)error {
     self.busy=NO; self.closeAfterSave=NO;
-    [self showFeedback:[NSString stringWithFormat:@"%@%@ Несохранённые изменения оставлены в окне.",self.savedCount ? @"Часть изменений сохранена. " : @"",error.localizedDescription]]; [self updateControls];
+    [self showFeedback:[NSString stringWithFormat:JML(@"%@%@ Несохранённые изменения оставлены в окне."),self.savedCount ? JML(@"Часть изменений сохранена. ") : @"",error.localizedDescription]]; [self updateControls];
 }
 - (void)verifySavedFields {
     if (!self.wroteAbout && !self.wroteStatus && !self.wroteNames) { [self finishedVerification:YES different:NO]; return; }
-    [self showFeedback:@"Проверяем сохранённые поля на сервере…"];
+    [self showFeedback:JML(@"Проверяем сохранённые поля на сервере…")];
     __weak JMOwnProfileController *weakSelf=self;
     [self.client fetchProfileForUIN:self.account completion:^(NSDictionary *profile,NSError *error) {
         JMOwnProfileController *self=weakSelf; if (!self) return;
@@ -290,7 +291,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
 }
 - (void)finishedVerification:(BOOL)verified different:(BOOL)different {
     self.busy=NO;
-    [self showFeedback:different ? @"Сервер вернул другие значения. Ваш текст оставлен в окне; его можно сохранить ещё раз." : (verified ? @"Изменения сохранены на сервере." : @"Сервер принял изменения, но повторная проверка полей недоступна. Проверьте их кнопкой «Обновить».")];
+    [self showFeedback:different ? JML(@"Сервер вернул другие значения. Ваш текст оставлен в окне; его можно сохранить ещё раз.") : (verified ? JML(@"Изменения сохранены на сервере.") : JML(@"Сервер принял изменения, но повторная проверка полей недоступна. Проверьте их кнопкой «Обновить»."))];
     [self updateControls];
     if (self.closeAfterSave && !different) { self.closeAfterSave=NO; [self.window orderOut:nil]; }
     self.closeAfterSave=NO;
@@ -300,9 +301,9 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     [self.window makeFirstResponder:nil];
     if (self.busy) return NO;
     if (![self dirty]) return YES;
-    NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=@"Сохранить изменения профиля?";
-    alert.informativeText=@"Текст и выбранная фотография ещё не отправлены в Jimm.online.";
-    [alert addButtonWithTitle:@"Сохранить"]; [alert addButtonWithTitle:@"Не сохранять"]; [[alert addButtonWithTitle:@"Отмена"] setKeyEquivalent:@"\e"];
+    NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=JML(@"Сохранить изменения профиля?");
+    alert.informativeText=JML(@"Текст и выбранная фотография ещё не отправлены в Jimm.online.");
+    [alert addButtonWithTitle:JML(@"Сохранить")]; [alert addButtonWithTitle:JML(@"Не сохранять")]; [[alert addButtonWithTitle:JML(@"Отмена")] setKeyEquivalent:@"\e"];
     NSInteger answer=[alert runModal];
     if (answer==NSAlertFirstButtonReturn) { self.closeAfterSave=YES; [self saveProfile:nil]; return NO; }
     if (answer==NSAlertSecondButtonReturn) { self.pendingAvatar=nil; self.loaded=NO; return YES; }

@@ -1,3 +1,4 @@
+#import "JMLocalization.h"
 #import "JMTextTools.h"
 #import "JMProtocol.h"
 #import <math.h>
@@ -5,7 +6,7 @@ NSString *JMQuotedMessage(NSDictionary *message, NSString *name) {
     NSString *text=JMString(message[@"text"]);
     text=[[text stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"] stringByReplacingOccurrencesOfString:@"\r" withString:@"\n"];
     name=[[JMString(name) componentsSeparatedByCharactersInSet:[NSCharacterSet controlCharacterSet]] componentsJoinedByString:@" "];
-    if (!name.length) name=@"Собеседник";
+    if (!name.length) name=JML(@"Собеседник");
     NSTimeInterval timestamp=[message[@"timestamp"] doubleValue]; NSString *heading=name;
     if (isfinite(timestamp) && timestamp>0) {
         NSDateFormatter *format=[[NSDateFormatter alloc] init]; format.dateFormat=@"dd.MM.yyyy HH:mm";

@@ -1,3 +1,4 @@
+#import "JMLocalization.h"
 #import "JMUpdateChecker.h"
 #import "JMHTTPClient.h"
 @interface JMUpdateChecker ()
@@ -18,7 +19,7 @@
             if ([json[@"draft"] isKindOfClass:[NSNumber class]] && [json[@"prerelease"] isKindOfClass:[NSNumber class]] && [pattern numberOfMatchesInString:tag options:0 range:NSMakeRange(0,[tag length])]==1 && [url isEqual:expected] && ![json[@"draft"] boolValue] && ![json[@"prerelease"] boolValue]) return @{@"version":[tag substringFromIndex:1],@"url":[NSURL URLWithString:expected],@"notes":[json[@"body"] isKindOfClass:[NSString class]] ? json[@"body"] : @""};
         }
     }
-    if (error) *error=[NSError errorWithDomain:@"online.jimm.updates" code:1 userInfo:@{NSLocalizedDescriptionKey:@"GitHub вернул неподходящее описание релиза. Повторите проверку позже."}]; return nil;
+    if (error) *error=[NSError errorWithDomain:@"online.jimm.updates" code:1 userInfo:@{NSLocalizedDescriptionKey:JML(@"GitHub вернул неподходящее описание релиза. Повторите проверку позже.")}]; return nil;
 }
 - (id)init { return [self initWithProtocolClasses:nil legacy:NO]; }
 - (id)initWithProtocolClasses:(NSArray *)classes legacy:(BOOL)legacy {

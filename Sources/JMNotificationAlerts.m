@@ -1,3 +1,4 @@
+#import "JMLocalization.h"
 #import "JMNotificationAlerts.h"
 #import "JMProtocol.h"
 
@@ -70,7 +71,7 @@
     NSUserNotification *notification=[[NSUserNotification alloc] init];
     NSUInteger count=[entry[@"count"] unsignedIntegerValue]; BOOL private=[self.contentStyle isEqualToString:@"private"];
     notification.title=private ? @"JimmMac" : JMString(entry[@"name"]);
-    NSString *generic=count>1 ? [NSString stringWithFormat:@"Новых сообщений: %lu",(unsigned long)count] : @"Новое сообщение";
+    NSString *generic=count>1 ? [NSString stringWithFormat:JML(@"Новых сообщений: %lu"),(unsigned long)count] : JML(@"Новое сообщение");
     NSString *body=JMString(entry[@"text"]);
     if ([self.contentStyle isEqualToString:@"preview"] && body.length) {
         body=[[body componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] componentsJoinedByString:@" "];
@@ -80,7 +81,7 @@
     if ([self supportsNotificationIdentifiers]) notification.identifier=[NSString stringWithFormat:@"JimmMac.message.%@.%@",self.accountUIN,peer];
     if (!self.deliveryIDs[peer]) self.deliveryIDs[peer]=[[NSUUID UUID] UUIDString];
     notification.userInfo=@{@"kind":@"message",@"account":self.accountUIN,@"peer":peer,@"delivery":self.deliveryIDs[peer]};
-    notification.hasActionButton=YES; notification.actionButtonTitle=@"Открыть"; notification.soundName=nil;
+    notification.hasActionButton=YES; notification.actionButtonTitle=JML(@"Открыть"); notification.soundName=nil;
     // Mountain Lion has no identifier property: replace only this account/peer.
     for (NSUserNotification *old in [[self deliveredNotifications] copy])
         if ([JMString(old.userInfo[@"account"]) isEqualToString:self.accountUIN] && [JMString(old.userInfo[@"peer"]) isEqualToString:peer]) [self removeNotification:old];
@@ -89,9 +90,9 @@
 - (BOOL)sendTestNotification {
     if (!self.enabled) return NO;
     NSUserNotification *notification=[[NSUserNotification alloc] init]; notification.title=@"JimmMac";
-    notification.informativeText=@"Уведомления работают. Нажмите, чтобы открыть JimmMac.";
+    notification.informativeText=JML(@"Уведомления работают. Нажмите, чтобы открыть JimmMac.");
     if ([self supportsNotificationIdentifiers]) notification.identifier=@"JimmMac.test"; notification.userInfo=@{@"kind":@"test"}; notification.soundName=nil;
-    notification.actionButtonTitle=@"Открыть"; return [self postNotification:notification];
+    notification.actionButtonTitle=JML(@"Открыть"); return [self postNotification:notification];
 }
 - (BOOL)userNotificationCenter:(NSUserNotificationCenter *)center shouldPresentNotification:(NSUserNotification *)notification {
     if (!self.enabled) return NO;

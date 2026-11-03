@@ -1,3 +1,4 @@
+#import "JMLocalization.h"
 #import "JMAPIClient.h"
 #import "JMProtocol.h"
 #import "JMHTTPClient.h"
@@ -45,7 +46,7 @@
     // UIN, token, session ID, messages or NSError's userInfo.
     [self.diagnosticEntries addObject:@{@"endpoint":path, @"http":@(http), @"api":@(api),
         @"errorDomain":error.domain ?: @"", @"errorCode":@(error.code),
-        @"version":@"0.13.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
+        @"version":@"0.14.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
     if ([self.diagnosticEntries count] > 20) [self.diagnosticEntries removeObjectAtIndex:0];
     NSURL *root = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
     NSURL *directory = [root URLByAppendingPathComponent:@"JimmMac" isDirectory:YES];
@@ -85,12 +86,12 @@
 - (void)loginWithUIN:(NSString *)uin password:(NSString *)password { [self loginWithUIN:uin password:password longTerm:NO]; }
 - (void)loginWithUIN:(NSString *)uin password:(NSString *)password longTerm:(BOOL)longTerm {
     [self prepareLoginWithUIN:uin];
-    [self status:@"Проверяем UIN и пароль…" connected:NO];
+    [self status:JML(@"Проверяем UIN и пароль…") connected:NO];
     [self call:@"/auth/clientLogin" parameters:@{@"s":uin,@"pwd":password,@"devId":@"JimmMac-Mavericks",@"tokenType":longTerm ? @"longterm" : @"shortterm"} timeout:30 completion:^(NSDictionary *data,NSError *error) {
         NSDictionary *issued=JMDictionary(data[@"token"]); NSString *token=JMString(issued[@"a"]);
         if (error || !token.length) { [self loginFailed:error]; return; }
         NSString *identity=JMString(data[@"loginId"]);
-        if (identity.length && ![identity isEqualToString:uin]) { [self loginFailed:[NSError errorWithDomain:JMAPIErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:@"Сервер вернул другой аккаунт. Вход отменён."}]]; return; }
+        if (identity.length && ![identity isEqualToString:uin]) { [self loginFailed:[NSError errorWithDomain:JMAPIErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер вернул другой аккаунт. Вход отменён.")}]]; return; }
         self.token=token; self.deliverLoginToken=YES;
         NSTimeInterval lifetime=[JMString(issued[@"expiresIn"] ?: data[@"tokenExpiresIn"]) doubleValue];
         self.tokenExpiration=isfinite(lifetime) && lifetime>0 && lifetime<=400*86400 ? [NSDate dateWithTimeIntervalSinceNow:lifetime] : nil;
@@ -103,29 +104,29 @@
     self.token=token; self.usingSavedToken=YES; [self verifySavedToken];
 }
 - (void)verifySavedToken {
-    [self status:@"Восстанавливаем сохранённый вход…" connected:NO];
+    [self status:JML(@"Восстанавливаем сохранённый вход…") connected:NO];
     [self call:@"/auth/getInfo" parameters:@{@"a":self.token} timeout:20 completion:^(NSDictionary *data,NSError *error) {
         if (error) {
             if ([error.domain isEqualToString:JMAPIErrorDomain] && (error.code==401 || error.code==330)) { [self loginFailed:error]; return; }
             NSTimeInterval delay=[self delayForError:error];
-            [self status:[NSString stringWithFormat:@"Нет соединения. Повтор входа через %.0f с…",delay] connected:NO];
+            [self status:[NSString stringWithFormat:JML(@"Нет соединения. Повтор входа через %.0f с…"),delay] connected:NO];
             [self later:delay block:^{ [self verifySavedToken]; }]; return;
         }
-        if (![JMString(JMDictionary(data[@"userData"])[@"loginId"]) isEqualToString:self.uin]) { [self loginFailed:[NSError errorWithDomain:JMAPIErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:@"Сохранённый вход относится к другому UIN. Введите пароль заново."}]]; return; }
+        if (![JMString(JMDictionary(data[@"userData"])[@"loginId"]) isEqualToString:self.uin]) { [self loginFailed:[NSError errorWithDomain:JMAPIErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сохранённый вход относится к другому UIN. Введите пароль заново.")}]]; return; }
         [self startSession];
     }];
 }
 - (void)loginFailed:(NSError *)error {
-    if (!error) error = [NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Сервер не вернул данные для входа."}];
-    if (self.usingSavedToken && [error.domain isEqual:JMAPIErrorDomain] && (error.code==330 || error.code==401)) error=[NSError errorWithDomain:error.domain code:error.code userInfo:@{NSLocalizedDescriptionKey:@"Сервер отклонил сохранённый вход. Введите UIN и пароль заново; после входа можно снова включить «Запомнить меня»."}];
+    if (!error) error = [NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер не вернул данные для входа.")}];
+    if (self.usingSavedToken && [error.domain isEqual:JMAPIErrorDomain] && (error.code==330 || error.code==401)) error=[NSError errorWithDomain:error.domain code:error.code userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер отклонил сохранённый вход. Введите UIN и пароль заново; после входа можно снова включить «Запомнить меня».")}];
     [self disconnect];
     [self.delegate client:self failedLogin:error];
 }
 - (void)startSession {
     NSUInteger attempt = ++self.sessionSerial;
-    [self status:@"Подключаемся к Jimm.online…" connected:NO];
+    [self status:JML(@"Подключаемся к Jimm.online…") connected:NO];
     [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,sessionEnded,rateLimit",
-                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.13.0", @"timeout":@"60"}
+                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.14.0", @"timeout":@"60"}
            timeout:30 completion:^(NSDictionary *data, NSError *error) {
         if (attempt != self.sessionSerial) return;
         if (error) {
@@ -140,7 +141,7 @@
         if ([self.delegate respondsToSelector:@selector(client:receivedOwnInfo:)]) [self.delegate client:self receivedOwnInfo:JMDictionary(data[@"myInfo"])];
         if (self.deliverLoginToken && [self.delegate respondsToSelector:@selector(client:authenticatedWithToken:expiresAt:)]) [self.delegate client:self authenticatedWithToken:self.token expiresAt:self.tokenExpiration];
         self.deliverLoginToken=NO;
-        [self status:@"Подключено" connected:YES];
+        [self status:JML(@"Подключено") connected:YES];
         NSString *state=JMString(JMDictionary(data[@"myInfo"])[@"state"]);
         if (self.preferredPresence && ![self.preferredPresence isEqualToString:state])
             [self setPresenceState:self.preferredPresence completion:^(NSDictionary *info,NSError *error) {}];
@@ -163,7 +164,7 @@
 - (void)retrySessionAfterError:(NSError *)error {
     NSTimeInterval delay = [self delayForError:error];
     NSUInteger attempt = self.sessionSerial;
-    [self status:[NSString stringWithFormat:@"Нет соединения. Повтор через %.0f с…", delay] connected:NO];
+    [self status:[NSString stringWithFormat:JML(@"Нет соединения. Повтор через %.0f с…"), delay] connected:NO];
     [self later:delay block:^{ if (attempt == self.sessionSerial) [self startSession]; }];
 }
 - (void)schedulePoll:(NSTimeInterval)delay {
@@ -183,8 +184,8 @@
                 self.sessionID = nil; [self startSession]; return;
             }
             NSTimeInterval delay = [self delayForError:error];
-            NSString *reason = [error.domain isEqualToString:JMAPIErrorDomain] ? [NSString stringWithFormat:@"API %ld", (long)error.code] : @"сеть недоступна";
-            [self status:[NSString stringWithFormat:@"Соединение прервано (%@). Повтор через %.0f с…", reason, delay] connected:NO];
+            NSString *reason = [error.domain isEqualToString:JMAPIErrorDomain] ? [NSString stringWithFormat:@"API %ld", (long)error.code] : JML(@"сеть недоступна");
+            [self status:[NSString stringWithFormat:JML(@"Соединение прервано (%@). Повтор через %.0f с…"), reason, delay] connected:NO];
             [self schedulePoll:delay]; return;
         }
         self.failures = 0;
@@ -201,25 +202,25 @@
                 if ([self.delegate respondsToSelector:@selector(client:receivedOwnInfo:)]) [self.delegate client:self receivedOwnInfo:payload];
             }
             else if ([type isEqualToString:@"sessionEnded"]) {
-                [self loginFailed:[NSError errorWithDomain:JMAPIErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:@"Сервер закрыл сессию. Войдите снова."}]]; return;
+                [self loginFailed:[NSError errorWithDomain:JMAPIErrorDomain code:401 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер закрыл сессию. Войдите снова.")}]]; return;
             } else {
                 NSDictionary *message = JMMessageFromEvent(event, self.uin);
                 if (message && ![self.delegate client:self receivedMessage:message]) {
-                    [self status:@"Не удалось сохранить сообщение. Проверяем диск…" connected:NO];
+                    [self status:JML(@"Не удалось сохранить сообщение. Проверяем диск…") connected:NO];
                     [self schedulePoll:5]; return; // Do not acknowledge an event until it is saved.
                 }
             }
         }
         long long last = [JMString(data[@"lastSeqNum"]) longLongValue];
         self.sequence = MAX(self.sequence, last);
-        [self status:@"Подключено" connected:YES];
+        [self status:JML(@"Подключено") connected:YES];
         NSTimeInterval delay = [JMString(data[@"timeToNextFetch"]) doubleValue] / 1000.0;
         [self schedulePoll:MAX(0.25, MIN(60, delay))];
     }];
 }
 - (void)sendText:(NSString *)text to:(NSString *)peer completion:(void (^)(NSDictionary *, NSError *))completion {
     if (!self.connected || ![self.sessionID length]) {
-        completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:-2 userInfo:@{NSLocalizedDescriptionKey:@"Подождите восстановления соединения."}]); return;
+        completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:-2 userInfo:@{NSLocalizedDescriptionKey:JML(@"Подождите восстановления соединения.")}]); return;
     }
     [self call:@"/im/sendIM" parameters:@{@"aimsid":self.sessionID, @"t":peer, @"message":text, @"offlineIM":@"true"} timeout:30
      completion:^(NSDictionary *data, NSError *error) { completion(data, error); }];
@@ -229,17 +230,17 @@
 }
 - (void)addContactWithUIN:(NSString *)uin group:(NSString *)group completion:(void (^)(NSDictionary *, NSError *))completion {
     if (!self.connected || ![self.sessionID length] || !JMValidUIN(uin)) {
-        completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:-2 userInfo:@{NSLocalizedDescriptionKey:@"Проверьте UIN и дождитесь подключения к сети."}]); return;
+        completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:-2 userInfo:@{NSLocalizedDescriptionKey:JML(@"Проверьте UIN и дождитесь подключения к сети.")}]); return;
     }
     NSMutableDictionary *parameters=[@{@"aimsid":self.sessionID,@"buddy":uin} mutableCopy];
     if (group.length) {
-        if (!JMValidRosterName(group,NO)) { completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Проверьте название группы (до 128 символов, без переносов строки)."}]); return; }
+        if (!JMValidRosterName(group,NO)) { completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Проверьте название группы (до 128 символов, без переносов строки).")}]); return; }
         parameters[@"group"]=group;
     }
     [self call:@"/buddylist/addBuddy" parameters:parameters timeout:30 completion:^(NSDictionary *data, NSError *error) {
         NSString *result = JMString(data[@"resultCode"]);
         if (!error && [result length] && ![result isEqualToString:@"alreadyExists"] && ![result isEqualToString:@"0"]) {
-            error = [NSError errorWithDomain:JMAPIErrorDomain code:-4 userInfo:@{NSLocalizedDescriptionKey:@"Сервер не смог добавить контакт. Проверьте номер и повторите попытку."}];
+            error = [NSError errorWithDomain:JMAPIErrorDomain code:-4 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер не смог добавить контакт. Проверьте номер и повторите попытку.")}];
         }
         completion(data, error);
     }];
@@ -251,12 +252,12 @@
         NSString *result=JMString(data[@"resultCode"]);
         BOOL existingGroup=[path isEqualToString:@"/buddylist/addGroup"] && [result isEqualToString:@"alreadyExists"];
         if (!error && result.length && ![result isEqualToString:@"0"] && !existingGroup)
-            error=[NSError errorWithDomain:JMAPIErrorDomain code:-4 userInfo:@{NSLocalizedDescriptionKey:@"Сервер не подтвердил изменение контакт-листа. Повторите после обновления списка."}];
+            error=[NSError errorWithDomain:JMAPIErrorDomain code:-4 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер не подтвердил изменение контакт-листа. Повторите после обновления списка.")}];
         completion(data,error);
     }];
 }
 - (void)invalidRosterInput:(void (^)(NSDictionary *, NSError *))completion {
-    completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Проверьте UIN и название: до 128 символов, без переносов строк."}]);
+    completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Проверьте UIN и название: до 128 символов, без переносов строк.")}]);
 }
 - (void)renameContactWithUIN:(NSString *)uin name:(NSString *)name completion:(void (^)(NSDictionary *, NSError *))completion {
     if (!JMValidUIN(uin) || !JMValidRosterName(name,YES)) { [self invalidRosterInput:completion]; return; }
@@ -284,22 +285,22 @@
 }
 - (BOOL)requireSession:(void (^)(NSDictionary *, NSError *))completion {
     if (self.connected && [self.sessionID length]) return YES;
-    completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:-2 userInfo:@{NSLocalizedDescriptionKey:@"Нет соединения. Нажмите «Подключиться» и повторите попытку."}]); return NO;
+    completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:-2 userInfo:@{NSLocalizedDescriptionKey:JML(@"Нет соединения. Нажмите «Подключиться» и повторите попытку.")}]); return NO;
 }
 - (void)fetchPresenceForUIN:(NSString *)uin completion:(void (^)(NSDictionary *, NSError *))completion {
     if (![self requireSession:completion]) return;
-    if (!JMValidUIN(uin)) { completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Проверьте UIN."}]); return; }
+    if (!JMValidUIN(uin)) { completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Проверьте UIN.")}]); return; }
     [self call:@"/presence/get" parameters:@{@"aimsid":self.sessionID,@"t":uin,@"mdir":@"1",@"profileMsg":@"1"} timeout:20 completion:completion];
 }
 - (void)fetchProfileForUIN:(NSString *)uin completion:(void (^)(NSDictionary *, NSError *))completion {
     if (![self requireSession:completion]) return;
-    if (!JMValidUIN(uin)) { completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Проверьте UIN."}]); return; }
+    if (!JMValidUIN(uin)) { completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Проверьте UIN.")}]); return; }
     [self call:@"/presence/getProfile" parameters:@{@"aimsid":self.sessionID,@"sn":uin} timeout:20 completion:completion];
 }
 - (void)setPresenceState:(NSString *)state completion:(void (^)(NSDictionary *, NSError *))completion {
     if (![self requireSession:completion]) return;
     if (![@[@"online",@"away",@"dnd",@"occupied",@"invisible"] containsObject:state]) {
-        completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Неизвестный статус."}]); return;
+        completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Неизвестный статус.")}]); return;
     }
     [self call:@"/presence/setState" parameters:@{@"aimsid":self.sessionID,@"view":state} timeout:20 completion:^(NSDictionary *data, NSError *error) {
         if (error) { completion(nil,error); return; }
@@ -329,7 +330,7 @@
 - (void)setOwnProfileText:(NSString *)text completion:(void (^)(NSDictionary *, NSError *))completion {
     if (![self requireSession:completion]) return;
     if (![text isKindOfClass:[NSString class]] || [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding]>4096) {
-        completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Текст «О себе» должен занимать не больше 4096 байт UTF-8."}]); return;
+        completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Текст «О себе» должен занимать не больше 4096 байт UTF-8.")}]); return;
     }
     [self call:@"/presence/setProfile" parameters:@{@"aimsid":self.sessionID,@"profile":text} timeout:30 completion:completion];
 }
@@ -341,7 +342,7 @@
             NSDictionary *p=JMDictionary(JMDictionary(entry)[@"profile"]);
             if ([JMString(p[@"aimId"]) isEqualToString:self.uin]) { profile=p; break; }
         }
-        if (!error && !profile) error=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Сервер не вернул вашу анкету. Нажмите «Обновить», чтобы повторить."}];
+        if (!error && !profile) error=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер не вернул вашу анкету. Нажмите «Обновить», чтобы повторить.")}];
         completion(profile,error);
     }];
 }
@@ -351,7 +352,7 @@
     NSMutableArray *values=[NSMutableArray array];
     for (NSString *key in [[fields allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
         if (![@[@"firstName",@"lastName"] containsObject:key] || !JMValidRosterName(fields[key],YES)) {
-            completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Имя и фамилия: до 128 символов каждое, без переносов строки."}]); return;
+            completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Имя и фамилия: до 128 символов каждое, без переносов строки.")}]); return;
         }
         [values addObject:[NSString stringWithFormat:@"%@=%@",key,fields[key]]];
     }
@@ -360,7 +361,7 @@
 - (void)setOwnStatusMessage:(NSString *)text completion:(void (^)(NSDictionary *, NSError *))completion {
     if (![self requireSession:completion]) return;
     if (![text isKindOfClass:[NSString class]] || text.length>256 || [text rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location!=NSNotFound) {
-        completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:@"Подпись статуса: до 256 символов, без переносов строки."}]); return;
+        completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Подпись статуса: до 256 символов, без переносов строки.")}]); return;
     }
     // Omit mood: editing the caption must not reset an existing x-status.
     [self call:@"/presence/setStatus" parameters:@{@"aimsid":self.sessionID,@"statusMsg":text} timeout:30 completion:completion];
@@ -369,7 +370,7 @@
     if (![self requireSession:completion]) return;
     const unsigned char *bytes=jpeg.bytes;
     if (jpeg.length<4 || jpeg.length>65536 || bytes[0]!=0xff || bytes[1]!=0xd8) {
-        completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:462 userInfo:@{NSLocalizedDescriptionKey:@"Выберите фотографию заново: нужен JPEG размером до 64 КБ."}]); return;
+        completion(nil,[NSError errorWithDomain:JMAPIErrorDomain code:462 userInfo:@{NSLocalizedDescriptionKey:JML(@"Выберите фотографию заново: нужен JPEG размером до 64 КБ.")}]); return;
     }
     NSString *url=[[[self baseURL] absoluteString] stringByAppendingFormat:@"/expressions/upload?%@",JMFormEncode(@{@"aimsid":self.sessionID,@"type":@"buddyIcon",@"f":@"json"})];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:30];
@@ -378,7 +379,7 @@
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:@"no-store" forHTTPHeaderField:@"Cache-Control"];
     [self performRequest:request path:@"/expressions/upload" completion:^(NSDictionary *data,NSError *error) {
-        if (!error && !JMString(data[@"id"]).length) error=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Сервер не подтвердил новый аватар. Обновите профиль перед повторной попыткой."}];
+        if (!error && !JMString(data[@"id"]).length) error=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер не подтвердил новый аватар. Обновите профиль перед повторной попыткой.")}];
         completion(data,error);
     }];
 }

@@ -1,9 +1,10 @@
+#import "JMLocalization.h"
 #import "JMLoginStore.h"
 #import "JMProtocol.h"
 #import <math.h>
 NSString * const JMLoginStoreErrorDomain=@"online.jimm.keychain";
 static NSError *LoginStoreError(NSInteger code) {
-    NSString *text=code==-2 ? @"Срок сохранённого входа истёк. Введите пароль ещё раз." : (code==-1 ? @"Сохранённый вход повреждён. Введите пароль ещё раз." : @"Связка ключей недоступна. Войти можно вручную; сохранённый вход пока не изменён.");
+    NSString *text=code==-2 ? JML(@"Срок сохранённого входа истёк. Введите пароль ещё раз.") : (code==-1 ? JML(@"Сохранённый вход повреждён. Введите пароль ещё раз.") : JML(@"Связка ключей недоступна. Войти можно вручную; сохранённый вход пока не изменён."));
     return [NSError errorWithDomain:JMLoginStoreErrorDomain code:code userInfo:@{NSLocalizedDescriptionKey:text}];
 }
 @interface JMLoginStore () {
@@ -45,7 +46,7 @@ static NSError *LoginStoreError(NSInteger code) {
     if (status==errSecItemNotFound) {
         NSMutableDictionary *item=[query mutableCopy]; [item removeObjectForKey:(__bridge NSString *)kSecMatchSearchList];
         if (_keychain) item[(__bridge NSString *)kSecUseKeychain]=(__bridge id)_keychain;
-        item[(__bridge NSString *)kSecAttrLabel]=@"JimmMac — сохранённый вход"; [item addEntriesFromDictionary:attributes];
+        item[(__bridge NSString *)kSecAttrLabel]=JML(@"JimmMac — сохранённый вход"); [item addEntriesFromDictionary:attributes];
         status=SecItemAdd((__bridge CFDictionaryRef)item,NULL);
         if (status==errSecDuplicateItem) status=SecItemUpdate((__bridge CFDictionaryRef)query,(__bridge CFDictionaryRef)attributes);
     }

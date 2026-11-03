@@ -1,4 +1,6 @@
+#import "JMLocalization.h"
 #import "JMStyle.h"
+#import "JMTheme.h"
 #import <ImageIO/ImageIO.h>
 NSImage *JMStatusImage(NSString *state) {
     static NSMutableDictionary *images;
@@ -29,8 +31,8 @@ NSImage *JMFlowerImage(void) {
     return image;
 }
 NSColor *JMSecondaryTextColor(void) { return [NSColor colorWithCalibratedWhite:0.34 alpha:1]; }
-NSColor *JMLegacyHeaderTopColor(void) { return [NSColor colorWithCalibratedRed:0.97 green:0.99 blue:0.94 alpha:1]; }
-NSColor *JMLegacyHeaderBottomColor(void) { return [NSColor colorWithCalibratedRed:0.81 green:0.88 blue:0.75 alpha:1]; }
+NSColor *JMLegacyHeaderTopColor(void) { return JMThemeHeaderTop(); }
+NSColor *JMLegacyHeaderBottomColor(void) { return JMThemeHeaderBottom(); }
 @implementation JMChromeView
 - (void)drawRect:(NSRect)dirtyRect {
     NSColor *top = self.topColor ?: [NSColor colorWithCalibratedWhite:0.97 alpha:1];
@@ -40,10 +42,12 @@ NSColor *JMLegacyHeaderBottomColor(void) { return [NSColor colorWithCalibratedRe
 }
 @end
 NSColor *JMSelectionColor(BOOL emphasized) {
+    if (JMTheme()==JMThemeMac2011) return [NSColor colorWithCalibratedRed:emphasized ? 0.84 : 0.90 green:emphasized ? 0.93 : 0.94 blue:emphasized ? 0.66 : 0.83 alpha:1];
+    if (JMTheme()==JMThemePro2003) return emphasized ? [NSColor colorWithCalibratedRed:0.05 green:0.14 blue:0.44 alpha:1] : [NSColor colorWithCalibratedWhite:0.83 alpha:1];
     return emphasized ? [NSColor colorWithCalibratedRed:0.25 green:0.42 blue:0.65 alpha:1] : [NSColor colorWithCalibratedRed:0.80 green:0.84 blue:0.88 alpha:1];
 }
 @implementation JMContactRowView
-- (NSBackgroundStyle)interiorBackgroundStyle { return self.selected && self.emphasized ? NSBackgroundStyleDark : NSBackgroundStyleLight; }
+- (NSBackgroundStyle)interiorBackgroundStyle { return self.selected && self.emphasized && JMTheme()!=JMThemeMac2011 ? NSBackgroundStyleDark : NSBackgroundStyleLight; }
 - (void)drawSelectionInRect:(NSRect)dirtyRect { [JMSelectionColor(self.emphasized) setFill]; NSRectFill(self.bounds); }
 - (void)refreshCells {
     for (NSView *view in self.subviews) if ([view isKindOfClass:[NSTableCellView class]]) [(NSTableCellView *)view setBackgroundStyle:self.interiorBackgroundStyle];
@@ -85,13 +89,13 @@ NSColor *JMSelectionColor(BOOL emphasized) {
         [[label cell] setWraps:YES]; [[label cell] setLineBreakMode:NSLineBreakByWordWrapping]; [self addSubview:label];
     }
     self.titleLabel.font=[NSFont boldSystemFontOfSize:17]; self.detailLabel.font=[NSFont systemFontOfSize:12]; self.detailLabel.textColor=JMSecondaryTextColor();
-    self.writeButton=[[NSButton alloc] initWithFrame:NSZeroRect]; self.writeButton.bezelStyle=NSRoundedBezelStyle; self.writeButton.title=@"Написать по UIN…";
-    self.writeButton.toolTip=@"Открыть новую переписку по номеру UIN"; [self addSubview:self.writeButton]; [self setHasPeer:NO]; return self;
+    self.writeButton=[[NSButton alloc] initWithFrame:NSZeroRect]; self.writeButton.bezelStyle=NSRoundedBezelStyle; self.writeButton.title=JML(@"Написать по UIN…");
+    self.writeButton.toolTip=JML(@"Открыть новую переписку по номеру UIN"); [self addSubview:self.writeButton]; [self setHasPeer:NO]; return self;
 }
 - (void)drawRect:(NSRect)dirtyRect { [[NSColor textBackgroundColor] setFill]; NSRectFill(dirtyRect); }
 - (void)setHasPeer:(BOOL)hasPeer {
-    self.titleLabel.stringValue=hasPeer ? @"Пока нет сообщений" : @"Здесь начнётся переписка";
-    self.detailLabel.stringValue=hasPeer ? @"Напишите первое сообщение. Черновик можно подготовить даже без сети." : @"Выберите контакт слева или начните разговор по UIN.";
+    self.titleLabel.stringValue=hasPeer ? JML(@"Пока нет сообщений") : JML(@"Здесь начнётся переписка");
+    self.detailLabel.stringValue=hasPeer ? JML(@"Напишите первое сообщение. Черновик можно подготовить даже без сети.") : JML(@"Выберите контакт слева или начните разговор по UIN.");
     self.writeButton.hidden=hasPeer; [self layoutContents];
 }
 - (void)layoutContents {
@@ -146,6 +150,15 @@ NSColor *JMSelectionColor(BOOL emphasized) {
 }
 - (void)layoutContents {
     CGFloat width=NSWidth(self.bounds), height=NSHeight(self.bounds);
+    BOOL compact=JMTheme()==JMThemePro2003 && [self.identifier isEqual:@"person"];
+    self.imageView.hidden=compact; self.detailLabel.hidden=compact;
+    if (compact) {
+        CGFloat badgeWidth=self.badge.text.length ? MAX(20,[self.badge.text sizeWithAttributes:@{NSFontAttributeName:[NSFont boldSystemFontOfSize:11]}].width+12) : 0;
+        self.presenceImage.frame=NSMakeRect(5,floor((height-16)/2),16,16);
+        self.textField.frame=NSMakeRect(26,floor((height-20)/2),MAX(0,width-36-(badgeWidth ? badgeWidth+8 : 0)),20);
+        self.badge.frame=NSMakeRect(width-8-badgeWidth,floor((height-18)/2),badgeWidth,18); self.badge.hidden=badgeWidth==0;
+        self.timestampLabel.hidden=YES; return;
+    }
     CGFloat stampWidth=self.timestampLabel.stringValue.length ? MAX(34,ceil([[self.timestampLabel cell] cellSize].width)+2) : 0;
     CGFloat badgeWidth=self.badge.text.length ? MAX(20,[self.badge.text sizeWithAttributes:@{NSFontAttributeName:[NSFont boldSystemFontOfSize:11]}].width+12) : 0;
     self.imageView.frame=NSMakeRect(10,floor((height-36)/2),36,36); self.presenceImage.frame=NSMakeRect(35,floor((height-36)/2)-3,16,16);
@@ -153,13 +166,21 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     self.textField.frame=NSMakeRect(56,height-27,MAX(0,width-68-(stampWidth ? stampWidth+8 : 0)),21);
     self.detailLabel.frame=NSMakeRect(56,10,MAX(0,width-68-(badgeWidth ? badgeWidth+8 : 0)),17);
     self.badge.frame=NSMakeRect(width-12-badgeWidth,10,badgeWidth,18); self.badge.hidden=badgeWidth==0;
+    if (JMTheme()==JMThemeMac2011 && [self.identifier isEqual:@"person"]) {
+        self.imageView.frame=NSMakeRect(9,floor((height-32)/2),32,32); self.presenceImage.frame=NSMakeRect(30,floor((height-32)/2)-3,16,16);
+        self.textField.frame=NSMakeRect(51,height-25,MAX(0,width-63-(stampWidth ? stampWidth+8 : 0)),19);
+        self.timestampLabel.frame=NSMakeRect(width-12-stampWidth,height-24,stampWidth,17);
+        self.detailLabel.frame=NSMakeRect(51,5,MAX(0,width-63-(badgeWidth ? badgeWidth+8 : 0)),17);
+        self.badge.frame=NSMakeRect(width-12-badgeWidth,5,badgeWidth,18);
+    }
 }
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize { [super resizeSubviewsWithOldSize:oldSize]; [self layoutContents]; }
 - (void)configureName:(NSString *)name detail:(NSString *)detail state:(NSString *)state unread:(NSInteger)unread {
     self.textField.stringValue=name; self.detailLabel.stringValue=detail; self.unread=unread;
-    self.textField.font=unread>0 ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:13];
+    CGFloat size=JMTheme()==JMThemePro2003 && [self.identifier isEqual:@"person"] ? 11 : 13;
+    self.textField.font=unread>0 ? [NSFont boldSystemFontOfSize:size] : [NSFont systemFontOfSize:size];
     self.badge.text=unread>99 ? @"99+" : (unread>0 ? [NSString stringWithFormat:@"%ld",(long)unread] : @"");
-    self.badge.toolTip=unread>0 ? [NSString stringWithFormat:@"Непрочитанных сообщений: %ld",(long)unread] : nil;
+    self.badge.toolTip=unread>0 ? [NSString stringWithFormat:JML(@"Непрочитанных сообщений: %ld"),(long)unread] : nil;
     // The native text-field cell exposes the exact count to Accessibility;
     // drawRect uses the separate compact text for the visible badge.
     self.badge.stringValue=self.badge.toolTip ?: @"";

@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import "JMProtocol.h"
 #import "JMHistory.h"
+#import "JMAccountData.h"
+#import "JMLocalization.h"
 #import "JMUpdateChecker.h"
 #import "JMGitHubTrust.h"
 #import "JMAPIClient.h"
@@ -374,6 +376,36 @@ int main(void) {
         NSMutableDictionary *failedConfirmation=[rollbackPending mutableCopy]; failedConfirmation[@"id"]=@"fail-confirm";
         Check(![migrated confirmLocalID:@"rollback-local" peer:@"222" message:failedConfirmation error:NULL] && [migrated messageWithID:@"rollback-local" peer:@"222"]!=nil,@"failed confirmation transaction keeps durable original outgoing text");
         sqlite3_exec(faultDB,"DROP TRIGGER fail_confirm",NULL,NULL,NULL); sqlite3_close(faultDB);
+        JMSetLanguage(@"en"); Check([JML(@"Открыть историю офлайн…") isEqual:@"Open Offline History…"] && [JMLocale().localeIdentifier isEqual:@"en_US_POSIX"],@"explicit English language translates UI and dates independently of system language"); JMSetLanguage(@"ru");
+        JMAccountData *accountData=[[JMAccountData alloc] initWithUIN:@"555" root:root];
+        NSDictionary *cache=@{@"uin":@"555",@"contacts":@{@"222":@{@"aimId":@"222",@"friendly":@"Имя для офлайн-просмотра",@"state":@"online",@"token":@"must-never-copy"}},@"serverIDs":@[@"222"],@"groups":@[@"Friends"],@"ownInfo":@{@"friendly":@"My fixture",@"password":@"must-never-copy"},@"profiles":@{@"222":@"Тестовая анкета"}};
+        Check([accountData saveRoster:cache error:NULL] && [[[accountData cachedRoster][@"contacts"] objectForKey:@"222"][@"friendly"] isEqual:@"Имя для офлайн-просмотра"],@"contact names and profiles survive as account-scoped offline cache");
+        Check([accountData cachedRoster][@"contacts"][@"222"][@"token"]==nil && [accountData cachedRoster][@"ownInfo"][@"password"]==nil,@"roster cache copies only allowlisted display fields");
+        Check([JMStoredAccounts(root) containsObject:@"555"] && ![JMStoredAccounts(root) containsObject:@"not-an-account"],@"offline account discovery uses only local valid UIN directories");
+        NSDictionary *manifest=@{@"format":@"JimmMacBackup",@"version":@1,@"uin":@"555",@"createdAt":@1793700000,@"drafts":@{@"222":@"Набранный ответ"},@"roster":cache,@"token":@"must-never-copy",@"preferences":@{@"FavoritePeers":@[@"222"],@"MutedPeers":@[@"333"],@"ChatFontSize":@18,@"InterfaceAppearance":@"mac2011",@"RememberedAccountUIN":@"555",@"password":@"must-never-copy"}};
+        [large appendMessage:@{@"peer":@"222",@"id":@"backup-unread",@"text":@"Unread",@"timestamp":@20001,@"outgoing":@NO} unread:YES error:NULL];
+        [large appendMessage:@{@"peer":@"222",@"id":@"backup-pending",@"text":@"Pending",@"timestamp":@20000,@"outgoing":@YES,@"delivery":@"pending"} error:NULL];
+        NSURL *backup=[root URLByAppendingPathComponent:@"Account.jimmbackup"];
+        Check([large writeBackupToURL:backup manifest:manifest error:NULL],@"live WAL database snapshots to one portable backup file");
+        NSError *backupReadError=nil; NSDictionary *manifestRead=[JMHistory backupManifestAtURL:backup error:&backupReadError];
+        if (!manifestRead) fprintf(stderr,"Fixture backup manifest read failed: %s\n",backupReadError.localizedDescription.UTF8String);
+        Check([manifestRead[@"drafts"][@"222"] isEqual:@"Набранный ответ"] && [manifestRead[@"preferences"][@"MutedPeers"] containsObject:@"333"],@"backup includes drafts and local notification settings");
+        Check(!manifestRead[@"token"] && !manifestRead[@"preferences"][@"RememberedAccountUIN"] && !manifestRead[@"preferences"][@"password"],@"backup never includes credentials or automatic-login pointers");
+        NSURL *targetRoot=[root URLByAppendingPathComponent:@"target"];
+        JMHistory *restored=[[JMHistory alloc] initWithUIN:@"555" root:targetRoot];
+        [restored appendMessage:@{@"peer":@"222",@"id":@"backup-unread",@"text":@"Unread",@"timestamp":@20001,@"outgoing":@NO} error:NULL];
+        Check([restored mergeBackupAtURL:backup error:NULL]==10001 && [restored countForPeer:@"222"]==10002 && [restored mergeBackupAtURL:backup error:NULL]==0,@"restoration merges complete large history idempotently without truncation or duplicates");
+        Check(![restored.unreadCounts[@"222"] integerValue] && [[[restored messageWithID:@"backup-pending" peer:@"222"] objectForKey:@"delivery"] isEqual:@"unknown"],@"restore preserves existing read flags and never resumes interrupted sending");
+        Check([other mergeBackupAtURL:backup error:NULL]==NSNotFound,@"backup cannot be imported under a different UIN");
+        Check(![large writeBackupToURL:[JMAccountDirectory(@"555",root) URLByAppendingPathComponent:@"history.sqlite"] manifest:manifest error:NULL],@"backup refuses overwriting the live database");
+        stat(backup.path.fileSystemRepresentation,&st); Check((st.st_mode&0777)==0600,@"backup file is readable only by its owner");
+        NSURL *malformedBackup=[root URLByAppendingPathComponent:@"Malformed.jimmbackup"];
+        [[NSFileManager defaultManager] copyItemAtURL:backup toURL:malformedBackup error:NULL];
+        sqlite3 *badDB=NULL; sqlite3_open(malformedBackup.path.fileSystemRepresentation,&badDB); sqlite3_exec(badDB,"UPDATE messages SET payload='[]' WHERE id='bulk-09999'",NULL,NULL,NULL); sqlite3_close(badDB);
+        JMHistory *rollbackHistory=[[JMHistory alloc] initWithUIN:@"555" root:[root URLByAppendingPathComponent:@"rollback-target"]];
+        Check([rollbackHistory mergeBackupAtURL:malformedBackup error:NULL]==NSNotFound && [rollbackHistory countForPeer:@"222"]==0,@"malformed imported row rolls back all earlier imported messages without crashing");
+        [@"not a backup" writeToURL:malformedBackup atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+        Check(![JMHistory backupManifestAtURL:malformedBackup error:NULL],@"invalid file is rejected without creating or replacing account data");
         [[NSFileManager defaultManager] removeItemAtURL:root error:NULL];
         requests = [NSMutableArray array]; forms = [NSMutableArray array]; bodies=[NSMutableArray array]; directoryNames=[@{@"firstName":@"Иван",@"lastName":@"Тест"} mutableCopy]; [NSURLProtocol registerClass:[FixtureProtocol class]];
         pollReply = @{@"events":@[offline, @{@"type":@"presence", @"seqNum":@8, @"eventData":@{@"aimId":@"222", @"state":@""}},

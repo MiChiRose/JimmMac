@@ -20,4 +20,7 @@
 - (BOOL)setDelivery:(NSString *)state forID:(NSString *)identifier peer:(NSString *)peer error:(NSError **)error;
 - (BOOL)confirmLocalID:(NSString *)identifier peer:(NSString *)peer message:(NSDictionary *)message error:(NSError **)error;
 - (BOOL)exportPeer:(NSString *)peer name:(NSString *)name account:(NSString *)account html:(BOOL)html toURL:(NSURL *)url error:(NSError **)error;
+- (BOOL)writeBackupToURL:(NSURL *)url manifest:(NSDictionary *)manifest error:(NSError **)error;
++ (NSDictionary *)backupManifestAtURL:(NSURL *)url error:(NSError **)error;
+- (NSUInteger)mergeBackupAtURL:(NSURL *)url error:(NSError **)error;
 @end

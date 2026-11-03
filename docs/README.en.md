@@ -22,7 +22,7 @@ reviving ICQ-style messaging. It brings UIN sign-in, contacts and everyday text
 conversations to older Intel Macs, with native AppKit controls, silver panels,
 the green ICQ flower and familiar message sounds.
 
-The interface is currently in Russian. The application is written in Objective-C
+The interface is available in Russian and English. The application is written in Objective-C
 and uses one Intel build targeting **OS X 10.8 Mountain Lion through macOS 10.13
 High Sierra**. It is an independent project, not an official ICQ application.
 
@@ -75,10 +75,42 @@ after restarting the application.
 
 </details>
 
+## New in 0.14.0
+
+The `main` branch contains testing version **0.14.0**. The latest published
+release in the downloads section is **0.12.0**; the features below apply to 0.14 source.
+
+- **Three appearances.** View → Appearance: Current, Nostalgia · ICQ for Mac 2011,
+  and Nostalgia · ICQ Pro 2003b. Historical modes use a separate compact contact
+  window. Double-click or press Enter to open a conversation. Switching preserves
+  your draft; window controls and keyboard commands remain native to the Mac.
+- **Offline history.** Use “Offline History…” on the sign-in screen or File →
+  Open Offline History. Read, search, export and write drafts without connecting.
+  Click Connect to send. Cached contact names remain available; presence is shown
+  as offline rather than presenting an old online status as current.
+- **Move to another Mac.** File → Create Backup saves a single `.jimmbackup` file
+  with history, drafts, cached contacts and preferences. Restore Backup is available
+  before sign-in. History merges without duplicates; differing drafts are retained
+  together. Restoration opens offline mode and does not change the server contact
+  list. Backups contain conversations, but no password or Keychain token; sign in
+  again on the other Mac.
+- **Muted conversations.** Right-click a contact → Mute Notifications. Incoming
+  messages and unread counts are kept; banners, sounds and Dock attention for that
+  conversation are suppressed. Use the same menu to unmute.
+- **Russian and English.** View → Interface Language. Restart normally from Finder
+  to apply the language to menus, windows, app messages and tooltips.
+
+<table><tr>
+<td><img src="../screenshots/UI-mac2011-contacts.png" alt="ICQ for Mac 2011 appearance, fictional contacts" width="268" /></td>
+<td><img src="../screenshots/UI-pro2003-contacts.png" alt="ICQ Pro 2003b appearance, fictional contacts" width="268" /></td>
+</tr></table>
+
+Runtime checks use **OS X 10.9.5**. All 806 automated checks and coverage checks for 505 RU/EN strings pass. Actual runs on 10.8 and 10.13 remain pending:
+those systems are currently unavailable. One build retains the 10.8 deployment target.
+
 ## New in 0.13.0
 
-The `main` branch contains the new 0.13.0 testing version. The latest published
-release in the download section above is still 0.12.0.
+The 0.13.0 features are included in the current source version.
 
 - **Persistent unread messages.** Counts survive restarting. Opening a conversation
   reveals its first unread message; “К последним ↓” returns to the end and marks

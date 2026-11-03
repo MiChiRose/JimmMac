@@ -1,3 +1,4 @@
+#import "JMLocalization.h"
 #import "JMProtocol.h"
 
 NSString * const JMAPIErrorDomain = @"online.jimm.mavericks.api";
@@ -9,7 +10,7 @@ NSString *JMString(id value) {
 NSDictionary *JMDictionary(id value) { return [value isKindOfClass:[NSDictionary class]] ? value : @{}; }
 NSArray *JMArray(id value) { return [value isKindOfClass:[NSArray class]] ? value : @[]; }
 BOOL JMValidUIN(NSString *text) {
-    if (![text length] || [text length] > 20) return NO;
+    if (![text isKindOfClass:[NSString class]] || ![text length] || [text length] > 20) return NO;
     return [text rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789"] invertedSet]].location == NSNotFound;
 }
 BOOL JMValidRosterName(NSString *text, BOOL allowEmpty) {
@@ -68,14 +69,14 @@ NSDictionary *JMDecodeResponse(NSData *data, NSURLResponse *response, NSError **
             retry = MAX(1, MIN(3600, [JMString([http allHeaderFields][key]) doubleValue]));
     if (status == 200 && (!http || [http statusCode] < 400)) return JMDictionary(envelope[@"data"]);
     NSInteger code = status ?: ([http statusCode] ?: -1);
-    NSString *message = @"Сервер вернул непонятный ответ. Попробуйте подключиться снова.";
-    if (code == 330) message = @"Неверный UIN или пароль. Проверьте данные Jimm.online.";
-    else if (code == 401) message = @"Сессия истекла. Подключаемся заново…";
-    else if (code == 430 || code == 429) message = [NSString stringWithFormat:@"Слишком много запросов. Повторите через %.0f с.", retry];
-    else if (code == 602) message = @"Сообщение не доставлено: получатель недоступен, заблокирован или его ящик заполнен.";
-    else if (code == 400 || code == 460) message = @"Сервер не принял параметры запроса.";
-    else if (code == 462) message = @"Сервер не принял аватар: допустимы GIF, JPEG и PNG размером до 64 КБ.";
-    else if (code >= 500) message = @"Сервис Jimm.online временно недоступен.";
+    NSString *message = JML(@"Сервер вернул непонятный ответ. Попробуйте подключиться снова.");
+    if (code == 330) message = JML(@"Неверный UIN или пароль. Проверьте данные Jimm.online.");
+    else if (code == 401) message = JML(@"Сессия истекла. Подключаемся заново…");
+    else if (code == 430 || code == 429) message = [NSString stringWithFormat:JML(@"Слишком много запросов. Повторите через %.0f с."), retry];
+    else if (code == 602) message = JML(@"Сообщение не доставлено: получатель недоступен, заблокирован или его ящик заполнен.");
+    else if (code == 400 || code == 460) message = JML(@"Сервер не принял параметры запроса.");
+    else if (code == 462) message = JML(@"Сервер не принял аватар: допустимы GIF, JPEG и PNG размером до 64 КБ.");
+    else if (code >= 500) message = JML(@"Сервис Jimm.online временно недоступен.");
     if (error) *error = JMError(code, message, retry);
     return nil;
 }

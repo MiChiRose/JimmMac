@@ -16,6 +16,9 @@
 #import "JMHTTPClient.h"
 #import "JMEmoticons.h"
 #import "JMUpdateChecker.h"
+#import "JMAccountData.h"
+#import "JMTheme.h"
+#import "JMLocalization.h"
 @interface JMHTTPTask (TransportProbe)
 - (BOOL)allowsRedirect:(NSURLRequest *)request;
 @end
@@ -108,6 +111,14 @@
 - (JMLoginStore *)makeLoginStore;
 - (NSUserDefaults *)makeLoginDefaults;
 - (JMHistory *)makeHistoryForUIN:(NSString *)uin;
+- (JMAccountData *)makeAccountDataForUIN:(NSString *)uin;
+- (NSArray *)storedAccountUINs;
+- (BOOL)openOfflineUIN:(NSString *)uin;
+- (void)toggleMuteConversation:(id)sender;
+- (void)changeAppearance:(id)sender;
+- (void)restoreBackupURL:(NSURL *)url manifest:(NSDictionary *)manifest;
+- (void)handleEscapeInWindow:(NSWindow *)window;
+- (BOOL)notificationAlerts:(JMNotificationAlerts *)alerts shouldNotifyPeer:(NSString *)peer;
 - (JMAvatarStore *)makeAvatarStore;
 - (void)startAutomaticLogin;
 - (void)cancelLogin:(id)sender;
@@ -226,6 +237,8 @@ static NSURL *testDraftRoot;
 - (JMLoginStore *)makeLoginStore { return [[FakeLoginStore alloc] init]; }
 - (NSUserDefaults *)makeLoginDefaults { return testAlertDefaults; }
 - (JMHistory *)makeHistoryForUIN:(NSString *)uin { return [[JMHistory alloc] initWithUIN:uin root:testDraftRoot]; }
+- (JMAccountData *)makeAccountDataForUIN:(NSString *)uin { return [[JMAccountData alloc] initWithUIN:uin root:testDraftRoot]; }
+- (NSArray *)storedAccountUINs { return testDraftRoot ? JMStoredAccounts(testDraftRoot) : @[]; }
 - (JMAvatarStore *)makeAvatarStore { return [[FixtureAvatarStore alloc] init]; }
 - (JMAudioAlerts *)makeAudioAlerts { return [[SilentAudioAlerts alloc] init]; }
 - (JMNotificationAlerts *)makeNotificationAlerts { return [[FakeNotificationAlerts alloc] initWithDefaults:testAlertDefaults center:nil]; }
@@ -1231,7 +1244,7 @@ int main(int argc, const char *argv[]) {
             // 0.13: isolated durable history, bounded pages and local display preferences.
             JMHistory *daily=[[JMHistory alloc] initWithUIN:@"12345" root:root];
             for (NSUInteger i=0;i<450;i++) [daily appendMessage:@{@"peer":@"666",@"id":[NSString stringWithFormat:@"page-%03lu",(unsigned long)i],@"text":[NSString stringWithFormat:@"Сообщение %lu :)",(unsigned long)i],@"timestamp":@(1793340000+i),@"outgoing":@NO} unread:i>=120 error:NULL];
-            [delegate setValue:daily forKey:@"history"]; [delegate setValue:@"12345" forKey:@"accountUIN"]; [delegate setValue:nil forKey:@"selectedPeer"];
+            [delegate setValue:daily forKey:@"history"]; [delegate setValue:@"12345" forKey:@"accountUIN"]; [delegate setValue:nil forKey:@"selectedPeer"]; [delegate restoreDraftsForUIN:@"12345"];
             [[delegate valueForKey:@"unread"] removeAllObjects]; [[delegate valueForKey:@"unread"] addEntriesFromDictionary:daily.unreadCounts];
             [[delegate valueForKey:@"favoritePeers"] removeAllObjects];
             [delegate client:client receivedBuddyList:@{@"groups":@[@{@"name":@"Тест",@"buddies":@[@{@"aimId":@"666",@"friendly":@"Анна",@"state":@"online"},@{@"aimId":@"777",@"friendly":@"Борис",@"state":@"offline"},@{@"aimId":@"888",@"friendly":@"Вера",@"state":@"away"}]}]}];
@@ -1280,13 +1293,13 @@ int main(int argc, const char *argv[]) {
             CheckUI(NSHeight(largePreview.frame)>=40 && !NSIntersectsRect(largePreview.frame,smileSetting.frame),"largest font preview and smiley preference have separate readable areas");
             Capture([delegate valueForKey:@"preferencesWindow"],[output stringByAppendingPathComponent:@"UI-daily-preferences.png"]);
             [fontPreferences setFamily:previousFamily size:previousSize]; [delegate applyChatFont]; [delegate closePreferences:nil];
-            UIUpdateChecker *updates=[[UIUpdateChecker alloc] init]; updates.releaseInfo=@{@"version":@"0.14.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.14.0"],@"notes":@"Fixture release"};
+            UIUpdateChecker *updates=[[UIUpdateChecker alloc] init]; updates.releaseInfo=@{@"version":@"0.15.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.15.0"],@"notes":@"Fixture release"};
             [delegate setValue:updates forKey:@"updateChecker"]; delegate.allowUpdatePresentation=@NO;
             [testAlertDefaults removeObjectForKey:@"UpdateNoticeShownVersion"]; [testAlertDefaults removeObjectForKey:@"LastSuccessfulUpdateCheck"];
             [delegate checkUpdatesAutomatically:YES]; PumpUI(0.05);
             CheckUI(updates.checks==1 && delegate.automaticUpdateNotices==0 && [delegate valueForKey:@"pendingUpdateRelease"]!=nil,"automatic update defers popup while login, sheet or auxiliary window has focus");
             delegate.allowUpdatePresentation=@YES; [delegate presentPendingUpdateIfPossible]; PumpUI(0.05);
-            CheckUI(delegate.automaticUpdateNotices==1 && [delegate.presentedUpdateVersion isEqual:@"0.14.0"],"available update opens automatically when main conversation is ready");
+            CheckUI(delegate.automaticUpdateNotices==1 && [delegate.presentedUpdateVersion isEqual:@"0.15.0"],"available update opens automatically when main conversation is ready");
             [delegate presentPendingUpdateIfPossible]; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
             CheckUI(delegate.automaticUpdateNotices==1 && updates.checks==1,"same update is shown once and network is not polled again within six hours");
             [testAlertDefaults setObject:[NSDate dateWithTimeIntervalSinceNow:-7*3600] forKey:@"LastSuccessfulUpdateCheck"]; updates.releaseInfo=@{@"version":@"0.13.0"}; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
@@ -1297,6 +1310,82 @@ int main(int argc, const char *argv[]) {
             [delegate toggleAutomaticUpdates:nil]; [delegate setValue:nil forKey:@"updateRetryDate"]; [delegate automaticUpdateTick:nil];
             CheckUI(updates.checks==3 && ![testAlertDefaults boolForKey:@"AutomaticallyCheckUpdates"],"automatic update menu setting disables background checks");
 
+
+            // Offline access, conversation mute and all three presentations share one account.
+            [delegate selectPeer:@"666"]; Draft(delegate,composer,@"Черновик для трёх оформлений");
+            NSMenuItem *muteItem=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(toggleMuteConversation:) keyEquivalent:@""]; muteItem.representedObject=@"666";
+            [delegate toggleMuteConversation:muteItem];
+            CheckUI([[testAlertDefaults arrayForKey:@"MutedPeers.12345"] containsObject:@"666"],"muted conversation persists per account");
+            delegate.forcedReading=@NO; [delegate selectPeer:@"777"];
+            SilentAudioAlerts *muteAudio=[delegate valueForKey:@"audioAlerts"]; NSUInteger beforeMuteEvents=muteAudio.events.count;
+            [delegate client:client receivedMessage:Incoming(@"muted-fixture",@"666",@"Тихое сообщение")];
+            CheckUI(muteAudio.events.count==beforeMuteEvents && ![delegate notificationAlerts:[delegate valueForKey:@"notificationAlerts"] shouldNotifyPeer:@"666"],"muted conversation suppresses sound and banner eligibility");
+            CheckUI([daily.unreadCounts[@"666"] integerValue]>0,"muting keeps incoming message and unread state");
+            [delegate selectPeer:@"666"]; Draft(delegate,composer,@"Черновик для трёх оформлений");
+            for (NSString *theme in @[@"mac2011",@"pro2003",@"current"]) {
+                NSMenuItem *choice=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(changeAppearance:) keyEquivalent:@""]; choice.representedObject=theme; [delegate changeAppearance:choice];
+                NSWindow *roster=[delegate valueForKey:@"rosterWindow"]; BOOL historic=![theme isEqual:@"current"];
+                CheckUI([JMThemeIdentifier() isEqual:theme] && [composer.string isEqual:@"Черновик для трёх оформлений"],"theme switch preserves active account draft");
+                CheckUI([delegate valueForKey:@"contactTable"]!=nil && [(NSView *)[delegate valueForKey:@"contactTable"] window]==(historic ? roster : chat),"same native contact table is reparented to correct window");
+                [chat setContentSize:historic ? NSMakeSize(540,480) : NSMakeSize(860,560)];
+                if (historic) [roster setContentSize:NSMakeSize(268,580)];
+                NSView *pane=[delegate valueForKey:@"chatPane"];
+                for (NSString *key in @[@"composer",@"sendButton",@"profileButton",@"historySearchButton",@"peerLabel",@"peerDetail"]) {
+                    NSView *view=[delegate valueForKey:key]; NSRect frame=[pane convertRect:view.bounds fromView:view];
+                    CheckUI(NSContainsRect(pane.bounds,frame),"conversation controls fit minimum themed window");
+                }
+                NSView *side=[delegate valueForKey:@"sidebar"];
+                CheckUI(NSContainsRect(side.bounds,sections.frame),"all contact and conversation tab labels fit historical roster");
+                NSView *next=[delegate valueForKey:@"presencePopup"];
+                for (NSUInteger j=0;j<20 && next;j++,next=next.nextKeyView) CheckUI(next.window==(historic ? roster : chat),"Tab loop stays within the roster window");
+                if (historic) {
+                    [chat makeKeyAndOrderFront:nil]; [chat makeFirstResponder:composer]; [delegate handleEscapeInWindow:chat];
+                    CheckUI(roster.isKeyWindow && roster.firstResponder==[delegate valueForKey:@"contactTable"],"Escape from historic chat focuses roster without losing draft");
+                    Capture(roster,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"UI-%@-contacts.png",theme]]);
+                }
+                Capture(chat,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"UI-%@-conversation.png",theme]]);
+            }
+            [delegate flushDrafts]; client.fixtureConnected=NO; FakeLoginStore *offlineLogin=[delegate valueForKey:@"loginStore"]; NSUInteger offlineReads=offlineLogin.reads, offlineRemovals=offlineLogin.removals;
+            CheckUI([delegate openOfflineUIN:@"12345"],"offline session opens local account without authentication");
+            CheckUI(offlineLogin.reads==offlineReads && offlineLogin.removals==offlineRemovals,"offline access neither reads nor removes saved credentials");
+            CheckUI([[[delegate valueForKey:@"contacts"] objectForKey:@"666"][@"friendly"] isEqual:@"Анна"] && [[[delegate valueForKey:@"contacts"] objectForKey:@"666"][@"state"] isEqual:@"offline"],"offline roster retains names while clearly showing stale presence as offline");
+            [delegate selectPeer:@"666"];
+            CheckUI(composer.isEditable && !send.isEnabled && [composer.string isEqual:@"Черновик для трёх оформлений"],"offline history restores editable draft while blocking transmission");
+            CheckUI([[delegate valueForKey:@"mutedPeers"] containsObject:@"666"] && [[delegate valueForKey:@"transcriptRanges"] count]>0,"offline session restores mute preference and message pages");
+            Capture(chat,[output stringByAppendingPathComponent:@"UI-offline.png"]);
+            [delegate toggleMuteConversation:muteItem];
+            CheckUI(![[testAlertDefaults arrayForKey:@"MutedPeers.12345"] containsObject:@"666"],"unmute is available while offline");
+            NSURL *portableRoot=[root URLByAppendingPathComponent:@"portable-source"];
+            JMHistory *portable=[[JMHistory alloc] initWithUIN:@"12345" root:portableRoot];
+            [portable appendMessage:Incoming(@"restored-fixture",@"888",@"Перенесённое сообщение") error:NULL];
+            NSDictionary *portableManifest=@{@"format":@"JimmMacBackup",@"version":@1,@"uin":@"12345",@"drafts":@{@"666":@"Черновик с другого Mac"},@"roster":@{@"uin":@"12345",@"contacts":@{@"888":@{@"friendly":@"Вера из копии"}},@"serverIDs":@[@"888"],@"groups":@[@"Restored"]},@"preferences":@{@"MutedPeers":@[@"888"],@"SoundsEnabled":@NO,@"ChatFontSize":@14,@"InterfaceAppearance":@"pro2003"}};
+            NSURL *portableURL=[root URLByAppendingPathComponent:@"UI-fixture.jimmbackup"];
+            CheckUI([portable writeBackupToURL:portableURL manifest:portableManifest error:NULL],"UI fixture creates portable backup from separate account storage");
+            [delegate restoreBackupURL:portableURL manifest:[JMHistory backupManifestAtURL:portableURL error:NULL]];
+            CheckUI(!composer.isEditable && [[delegate valueForKey:@"dataOperationInProgress"] boolValue],"restoration freezes editor until account data is applied");
+            dispatch_sync((dispatch_queue_t)[delegate valueForKey:@"historySearchQueue"],^{}); PumpUI(0.2);
+            [delegate selectPeer:@"666"];
+            CheckUI([composer.string rangeOfString:@"Черновик для трёх оформлений"].location!=NSNotFound && [composer.string rangeOfString:@"Черновик с другого Mac"].location!=NSNotFound,"restore retains both differing drafts without losing local text");
+            CheckUI([[(JMHistory *)[delegate valueForKey:@"history"] messageWithID:@"restored-fixture" peer:@"888"] count]>0 && [[delegate valueForKey:@"contacts"] objectForKey:@"666"]!=nil,"restoration merges history and cached contacts into existing account");
+            CheckUI(![(JMAudioAlerts *)[delegate valueForKey:@"audioAlerts"] enabled] && [[delegate valueForKey:@"mutedPeers"] containsObject:@"888"] && JMTheme()==JMThemePro2003,"restored notification and appearance preferences take effect immediately");
+            CheckUI(![[delegate valueForKey:@"dataOperationInProgress"] boolValue] && composer.isEditable && !send.isEnabled,"restoration ends in usable offline draft mode");
+            NSMenuItem *restoreCurrent=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(changeAppearance:) keyEquivalent:@""]; restoreCurrent.representedObject=@"current"; [delegate changeAppearance:restoreCurrent];
+
+            JMSetLanguage(@"en");
+            CheckUI([JML(@"Ностальгия · ICQ для Mac 2011") isEqual:@"Nostalgia · ICQ for Mac 2011"],"English localization includes historical appearance names");
+            [testAlertDefaults setObject:@"en" forKey:@"InterfaceLanguage"];
+            SmokeDelegate *english=[[SmokeDelegate alloc] init]; [english applicationDidFinishLaunching:nil];
+            NSWindow *englishLogin=[english valueForKey:@"loginWindow"];
+            CheckUI([[[english valueForKey:@"loginButton"] title] isEqual:@"Sign In"] || [[[english valueForKey:@"loginButton"] title] isEqual:@"Sign in"],"English launch translates sign-in button");
+            NSSegmentedControl *englishSections=[english valueForKey:@"sectionControl"];
+            CheckUI([[englishSections labelForSegment:0] isEqual:@"Contacts"] && [[englishSections labelForSegment:1] isEqual:@"Conversations"],"English launch translates both main tabs");
+            Capture(englishLogin,[output stringByAppendingPathComponent:@"UI-English-login.png"]);
+            CheckUI([english openOfflineUIN:@"12345"],"English launch can open existing offline history"); [english selectPeer:@"666"];
+            NSWindow *englishChat=[english valueForKey:@"chatWindow"]; [englishChat setContentSize:NSMakeSize(860,560)];
+            CheckUI(NSWidth(englishSections.frame)>=[[englishSections cell] cellSize].width,"English tab labels fit the smallest window");
+            Capture(englishChat,[output stringByAppendingPathComponent:@"UI-English-offline.png"]);
+            [englishLogin orderOut:nil]; [[english valueForKey:@"chatWindow"] orderOut:nil];
+            JMSetLanguage(@"ru"); [testAlertDefaults setObject:@"ru" forKey:@"InterfaceLanguage"]; [app setDelegate:delegate];
 
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
             emptyView=[delegate valueForKey:@"conversationEmptyView"]; emptyFits=YES;

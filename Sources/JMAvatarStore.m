@@ -1,10 +1,11 @@
+#import "JMLocalization.h"
 #import "JMAvatarStore.h"
 #import "JMProtocol.h"
 #import "JMHTTPClient.h"
 #import <ImageIO/ImageIO.h>
 static const NSUInteger JMAvatarByteLimit = 1024 * 1024;
 NSData *JMPrepareAvatar(NSData *data, NSError **error) {
-    NSString *failure=@"Не удалось прочитать фотографию. Выберите JPEG, PNG или GIF до 20 МБ.";
+    NSString *failure=JML(@"Не удалось прочитать фотографию. Выберите JPEG, PNG или GIF до 20 МБ.");
     CGImageSourceRef source=data.length && data.length<=20*1024*1024 ? CGImageSourceCreateWithData((__bridge CFDataRef)data,NULL) : NULL;
     CGImageRef thumbnail=NULL;
     if (source) {
@@ -37,7 +38,7 @@ NSData *JMPrepareAvatar(NSData *data, NSError **error) {
                 NSData *jpeg=[rep representationUsingType:NSJPEGFileType properties:@{NSImageCompressionFactor:quality}];
                 if (jpeg.length && jpeg.length<=65536) return jpeg;
             }
-            failure=@"Не удалось уменьшить фотографию до 64 КБ. Выберите другую картинку.";
+            failure=JML(@"Не удалось уменьшить фотографию до 64 КБ. Выберите другую картинку.");
         } else CGImageRelease(thumbnail);
     }
     if (error) *error=[NSError errorWithDomain:JMAPIErrorDomain code:462 userInfo:@{NSLocalizedDescriptionKey:failure}];
@@ -95,13 +96,13 @@ NSImage *JMDecodeAvatar(NSData *data) {
 - (NSImage *)imageForUIN:(NSString *)uin {
     if (!JMValidUIN(uin)) return nil;
     NSImage *image=[self.images objectForKey:uin]; if (image) return image;
-    if (self.pending[uin] || [self.retryAfter[uin] timeIntervalSinceNow]>0 || !self.network) return nil;
     NSURL *file=[self.cacheDirectory URLByAppendingPathComponent:[uin stringByAppendingString:@".image"]];
     NSDictionary *attributes=[[NSFileManager defaultManager] attributesOfItemAtPath:file.path error:NULL];
-    if ([attributes[NSFileSize] unsignedLongLongValue]<=JMAvatarByteLimit && [attributes[NSFileModificationDate] timeIntervalSinceNow]>-86400) {
+    if ([attributes[NSFileSize] unsignedLongLongValue]<=JMAvatarByteLimit && (!self.network || [attributes[NSFileModificationDate] timeIntervalSinceNow]>-86400)) {
         image=[self decode:[NSData dataWithContentsOfURL:file]];
         if (image) { [self.images setObject:image forKey:uin cost:(NSUInteger)(image.size.width*image.size.height*4)]; return image; }
     }
+    if (!self.network || self.pending[uin] || [self.retryAfter[uin] timeIntervalSinceNow]>0) return nil;
     NSString *url=[@"https://jimm.online/webapi/expressions/get?" stringByAppendingString:JMFormEncode(@{@"t":uin,@"type":@"buddyIcon"})];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
     [request setValue:@"image/*" forHTTPHeaderField:@"Accept"]; [request setValue:@"no-store" forHTTPHeaderField:@"Cache-Control"];

@@ -1,5 +1,7 @@
 # Local build products and macOS metadata
 build/
+build-dev/
+build-dev-tests/
 build-update/
 build-compat/
 build-verify/
@@ -17,3 +19,5 @@ network-diagnostics.json
 *.log
 
 dist/
+
+*.jimmbackup
