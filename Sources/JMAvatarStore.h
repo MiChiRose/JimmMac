@@ -10,5 +10,7 @@ NSData *JMPrepareAvatar(NSData *data, NSError **error);
 - (NSImage *)imageForUIN:(NSString *)uin;
 - (void)refreshUIN:(NSString *)uin;
 - (void)storeUploadedAvatar:(NSData *)data forUIN:(NSString *)uin;
+- (unsigned long long)cacheBytes;
+- (BOOL)clearCache:(NSError **)error;
 - (void)invalidate;
 @end

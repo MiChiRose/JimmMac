@@ -47,3 +47,6 @@ NSImage *JMClassicToolbarImage(NSString *name);
 @end
 @interface JMClassicAvatarView : NSImageView
 @end
+// Shared utility-window chrome; preserves native window controls and responder chain.
+void JMDecorateUtilityWindow(NSWindow *window,NSString *title);
+void JMRefreshUtilityWindow(NSWindow *window);

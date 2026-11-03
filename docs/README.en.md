@@ -75,6 +75,34 @@ after restarting the application.
 
 </details>
 
+## New in 0.15.0 — main branch
+
+The source contains **0.15.0**; the public downloads above still refer to **0.14.2**.
+
+- **Consistent utility windows.** Preferences, history search, profiles, groups,
+  diagnostics and local data follow all three appearances while retaining native
+  Mac window controls, text fields, focus and keyboard commands.
+- **Diagnostics.** Help → Diagnostics shows connection state, transport and recent
+  request codes. Copy Report excludes UINs, names, passwords, tokens, request URLs
+  with parameters and message text.
+- **Automatic status.** Preferences → Status offers 5, 10, 15, 30 or 60 minutes
+  of Mac inactivity. Activity restores Online only after automatic Away; manual
+  status choices take priority. This feature is off by default.
+- **History navigation.** Search all conversations, the current one or a specific
+  contact, filter by inclusive dates, or use Go to Date for the first message of
+  a day. Right-click a message → Add Bookmark; File → Message Bookmarks opens saved
+  messages. Bookmarks are included in portable `.jimmbackup` files.
+- **Local data.** JimmMac → Local Data shows message counts, history and cache sizes,
+  separate avatar cache cleanup, and history deletion by date range. Saving a backup
+  before deletion is enabled by default; a failed backup prevents deletion.
+  The original JSON migration file is retained separately.
+- **Live preferences preview.** Preferences → Appearance shows sample messages with
+  the chosen font and emoticons, regular/compact lists, and Restore Defaults.
+  Resetting preferences keeps history, contacts, drafts and saved sign-in.
+
+[0.15 verification on Mavericks](VERIFICATION-0.15.md): 1269 automated checks
+and 583 RU/EN strings.
+
 ## New in 0.14
 
 The current published release is **0.14.2**. All features below are included

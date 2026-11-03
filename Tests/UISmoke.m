@@ -18,6 +18,7 @@
 #import "JMUpdateChecker.h"
 #import "JMAccountData.h"
 #import "JMTheme.h"
+#import "JMAutoAway.h"
 #import "JMLocalization.h"
 @interface JMHTTPTask (TransportProbe)
 - (BOOL)allowsRedirect:(NSURLRequest *)request;
@@ -29,6 +30,22 @@
 #import <math.h>
 
 @interface JMAppDelegate (SmokeAccess)
+- (NSTimeInterval)systemIdleSeconds;
+- (void)autoAwayTick:(id)sender;
+- (void)workspaceDidWake:(NSNotification *)notification;
+- (void)showDiagnostics:(id)sender;
+- (void)copyDiagnostics:(id)sender;
+- (NSDate *)startOfDay:(NSDate *)date;
+- (NSDate *)dayAfter:(NSDate *)date;
+- (void)jumpToHistoryDay:(id)sender;
+- (void)showBookmarks:(id)sender;
+- (void)toggleMessageBookmark:(NSMenuItem *)sender;
+- (void)appearancePreferencesChanged:(id)sender;
+- (void)restoreStandardPreferences;
+- (void)showStorage:(id)sender;
+- (void)closeStorage:(id)sender;
+- (void)clearAvatarCache:(id)sender;
+- (void)deleteHistoryPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until backupURL:(NSURL *)url;
 - (void)loadEarlierMessages:(id)sender;
 - (void)loadNewerMessages:(id)sender;
 - (void)setTranscriptAroundID:(NSString *)identifier;
@@ -170,6 +187,7 @@ static NSURL *testDraftRoot;
 - (BOOL)removeLoginForUIN:(NSString *)uin error:(NSError **)error { self.removals++; if (self.failure) { if (error) *error=self.failure; return NO; } [self.records removeObjectForKey:uin]; return YES; }
 @end
 @interface SmokeDelegate : JMAppDelegate
+@property(nonatomic,strong) NSNumber *fixtureIdle;
 @property(nonatomic) NSUInteger terminationReplies;
 @property(nonatomic,strong) NSNumber *allowUpdatePresentation;
 @property(nonatomic,copy) NSString *presentedUpdateVersion;
@@ -225,12 +243,13 @@ static NSURL *testDraftRoot;
 @property(nonatomic) NSUInteger savedImages;
 @end
 @implementation FixtureAvatarStore
-- (id)init { self=[super init]; [self invalidate]; return self; }
+- (id)init { self=[super init]; [self invalidate]; NSURL *cache=[testDraftRoot URLByAppendingPathComponent:@"fixture-avatars"]; if (cache) { [self setValue:cache forKey:@"cacheDirectory"]; [[NSFileManager defaultManager] createDirectoryAtURL:cache withIntermediateDirectories:YES attributes:nil error:NULL]; } return self; }
 - (NSImage *)imageForUIN:(NSString *)uin { return self.fixtureImage; }
 - (void)refreshUIN:(NSString *)uin {}
 - (void)storeUploadedAvatar:(NSData *)data forUIN:(NSString *)uin { self.fixtureImage=JMDecodeAvatar(data); self.savedImages++; }
 @end
 @implementation SmokeDelegate
+- (NSTimeInterval)systemIdleSeconds { return self.fixtureIdle ? self.fixtureIdle.doubleValue : [super systemIdleSeconds]; }
 - (void)completeTermination { self.terminationReplies++; }
 - (void)scheduleAutomaticUpdateChecks {} // No real update requests during fictional UI tests.
 - (BOOL)canPresentAutomaticUpdate { return self.allowUpdatePresentation ? self.allowUpdatePresentation.boolValue : [super canPresentAutomaticUpdate]; }
@@ -257,6 +276,9 @@ static NSURL *testDraftRoot;
 - (void)showMainWindow:(id)sender { self.showWindowCount++; [super showMainWindow:sender]; }
 @end
 @interface UIClient : JMAPIClient
+@property(nonatomic) BOOL holdPresence;
+@property(nonatomic,copy) void (^pendingPresence)(NSDictionary *,NSError *);
+@property(nonatomic) NSUInteger reconnects;
 @property(nonatomic) BOOL fixtureConnected;
 @property(nonatomic, copy) NSString *addedUIN;
 @property(nonatomic, copy) NSString *chosenState;
@@ -284,6 +306,7 @@ static NSURL *testDraftRoot;
 @property(nonatomic, copy) NSString *loginUIN;
 @end
 @implementation UIClient
+- (void)reconnect { self.reconnects++; }
 - (id)init { self=[super init]; if (self) { self.rosterCalls=[NSMutableArray array]; self.ownCalls=[NSMutableArray array]; self.ownNames=[@{@"firstName":@"Иван",@"lastName":@"Тестовый"} mutableCopy]; self.ownAbout=@"Люблю старые Mac и простые мессенджеры."; self.ownCaption=@"На связи со старого Mac"; } return self; }
 - (void)rosterReply:(NSString *)action completion:(void (^)(NSDictionary *,NSError *))completion {
     [self.rosterCalls addObject:action];
@@ -326,7 +349,7 @@ static NSURL *testDraftRoot;
     self.lastNameFields=[fields copy]; __weak UIClient *weakSelf=self;
     [self ownAction:@"names" completion:^(NSDictionary *d,NSError *e) { if (!e) [weakSelf.ownNames addEntriesFromDictionary:fields]; completion(d,e); }];
 }
-- (void)setPresenceState:(NSString *)state completion:(void (^)(NSDictionary *, NSError *))completion { self.chosenState=state; completion(@{@"state":state,@"_presenceVerification":@"confirmed"},nil); }
+- (void)setPresenceState:(NSString *)state completion:(void (^)(NSDictionary *, NSError *))completion { self.chosenState=state; if (self.holdPresence) { self.pendingPresence=completion; return; } completion(@{@"state":state,@"_presenceVerification":@"confirmed"},nil); }
 - (void)setTypingStatus:(NSString *)status forUIN:(NSString *)uin { self.lastTyping=status; }
 - (void)sendText:(NSString *)text to:(NSString *)peer completion:(void (^)(NSDictionary *,NSError *))completion {
     self.sentText=text; self.sendCount++; self.pendingSend=completion;
@@ -455,6 +478,7 @@ static void Capture(NSWindow *window, NSString *path) {
     NSData *png = [bitmap representationUsingType:NSPNGFileType properties:@{}];
     if (![png writeToFile:path atomically:YES]) { fprintf(stderr, "Cannot write UI snapshot\n"); exit(1); }
 }
+#include "ImprovementUI.inc"
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc != 2) return 2;
@@ -503,6 +527,10 @@ int main(int argc, const char *argv[]) {
         client.fixtureConnected = YES;
         [delegate client:client receivedOwnInfo:@{@"friendly":@"Тестовый пользователь",@"state":@"online"}];
         [delegate client:client changedStatus:@"В сети · тестовые данные" connected:YES];
+        if (getenv("JIMMMAC_IMPROVEMENTS_ONLY")) {
+            [delegate setValue:@"111" forKey:@"accountUIN"]; [delegate setValue:[[FixtureAvatarStore alloc] init] forKey:@"avatars"];
+            ImprovementUI(delegate,output); [[NSFileManager defaultManager] removeItemAtURL:root error:NULL]; printf("PASS: %lu focused improvement UI checks\n",(unsigned long)uiChecks); return 0;
+        }
         {
             NSTextField *account=[delegate valueForKey:@"accountLabel"], *connection=[delegate valueForKey:@"statusLabel"];
             NSString *identity=[account.stringValue copy];
@@ -533,7 +561,7 @@ int main(int argc, const char *argv[]) {
         historyQuery.stringValue=@"привет"; [delegate controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification object:historyQuery]]; PumpUI(0.55);
         CheckUI([[delegate valueForKey:@"historyResults"] count]==2,"history window searches all conversations in current account");
         Capture(historyWindow,[output stringByAppendingPathComponent:@"UI-history-search.png"]);
-        [historyWindow setContentSize:NSMakeSize(580,360)]; Capture(historyWindow,[output stringByAppendingPathComponent:@"UI-history-search-small.png"]);
+        [historyWindow setContentSize:historyWindow.contentMinSize]; Capture(historyWindow,[output stringByAppendingPathComponent:@"UI-history-search-small.png"]);
         CheckUI(NSMaxX(historyQuery.frame)+8<=NSMinX(scope.frame),"history query and scope remain separate at minimum size");
         [scope selectItemAtIndex:1]; [delegate searchHistory:nil]; PumpUI(0.55);
         CheckUI([[delegate valueForKey:@"historyResults"] count]==1,"current-conversation history scope filters results");
@@ -959,8 +987,8 @@ int main(int argc, const char *argv[]) {
             NSMenu *base=[[NSMenu alloc] initWithTitle:@"Native"]; [base addItemWithTitle:@"Копировать" action:@selector(copy:) keyEquivalent:@""];
             NSRange clicked=[linkedTranscript.string rangeOfString:@"Ссылка https://jimm.online/developers"];
             NSMenu *messageMenu=[delegate textView:linkedTranscript menu:base forEvent:nil atIndex:clicked.location];
-            CheckUI(messageMenu.numberOfItems==4 && base.numberOfItems==1 && [messageMenu itemAtIndex:0].action==@selector(quoteMessage:),"message context menu adds quote and whole-message copy without replacing native actions");
-            NSMenuItem *quoteItem=[messageMenu itemAtIndex:0], *copyItem=[messageMenu itemAtIndex:1];
+            CheckUI(messageMenu.numberOfItems==5 && base.numberOfItems==1 && [messageMenu itemAtIndex:1].action==@selector(quoteMessage:),"message context menu adds quote and whole-message copy without replacing native actions");
+            NSMenuItem *quoteItem=[messageMenu itemAtIndex:1], *copyItem=[messageMenu itemAtIndex:2];
             [delegate copyWholeMessage:copyItem];
             CheckUI([delegate.copiedMessage isEqualToString:@"Ссылка https://jimm.online/developers и test@example.com. Тест поиска — Mavericks."],"copy whole message excludes timestamp and sender heading");
             Draft(delegate,composer,@"Мой ответ уже набран"); NSUInteger sends=client.sendCount; [delegate quoteMessage:quoteItem];
@@ -1296,13 +1324,13 @@ int main(int argc, const char *argv[]) {
             CheckUI(NSHeight(largePreview.frame)>=40 && !NSIntersectsRect(largePreview.frame,smileSetting.frame),"largest font preview and smiley preference have separate readable areas");
             Capture([delegate valueForKey:@"preferencesWindow"],[output stringByAppendingPathComponent:@"UI-daily-preferences.png"]);
             [fontPreferences setFamily:previousFamily size:previousSize]; [delegate applyChatFont]; [delegate closePreferences:nil];
-            UIUpdateChecker *updates=[[UIUpdateChecker alloc] init]; updates.releaseInfo=@{@"version":@"0.15.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.15.0"],@"notes":@"Fixture release"};
+            UIUpdateChecker *updates=[[UIUpdateChecker alloc] init]; updates.releaseInfo=@{@"version":@"0.16.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.16.0"],@"notes":@"Fixture release"};
             [delegate setValue:updates forKey:@"updateChecker"]; delegate.allowUpdatePresentation=@NO;
             [testAlertDefaults removeObjectForKey:@"UpdateNoticeShownVersion"]; [testAlertDefaults removeObjectForKey:@"LastSuccessfulUpdateCheck"];
             [delegate checkUpdatesAutomatically:YES]; PumpUI(0.05);
             CheckUI(updates.checks==1 && delegate.automaticUpdateNotices==0 && [delegate valueForKey:@"pendingUpdateRelease"]!=nil,"automatic update defers popup while login, sheet or auxiliary window has focus");
             delegate.allowUpdatePresentation=@YES; [delegate presentPendingUpdateIfPossible]; PumpUI(0.05);
-            CheckUI(delegate.automaticUpdateNotices==1 && [delegate.presentedUpdateVersion isEqual:@"0.15.0"],"available update opens automatically when main conversation is ready");
+            CheckUI(delegate.automaticUpdateNotices==1 && [delegate.presentedUpdateVersion isEqual:@"0.16.0"],"available update opens automatically when main conversation is ready");
             [delegate presentPendingUpdateIfPossible]; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
             CheckUI(delegate.automaticUpdateNotices==1 && updates.checks==1,"same update is shown once and network is not polled again within six hours");
             [testAlertDefaults setObject:[NSDate dateWithTimeIntervalSinceNow:-7*3600] forKey:@"LastSuccessfulUpdateCheck"]; updates.releaseInfo=@{@"version":@"0.13.0"}; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
@@ -1435,10 +1463,12 @@ int main(int argc, const char *argv[]) {
                 if ([mode isEqual:@"pro2003"]) { NSTextField *nick=[english valueForKey:@"themeNickTitle"]; CheckUI([nick.stringValue isEqual:@"Nick:"] && NSWidth(nick.frame)>=[nick.cell cellSize].width,"English classic nickname label fits without truncating First name"); }
                 Capture(englishChat,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"UI-English-%@.png",mode]]);
             }
+            ImprovementEnglishUI(english,output);
             NSMenuItem *back=[[NSMenuItem alloc] init]; back.representedObject=@"current"; [english changeAppearance:back]; [[english valueForKey:@"rosterWindow"] orderOut:nil];
             [englishLogin orderOut:nil]; [[english valueForKey:@"chatWindow"] orderOut:nil];
             JMSetLanguage(@"ru"); [testAlertDefaults setObject:@"ru" forKey:@"InterfaceLanguage"]; [app setDelegate:delegate];
 
+            ImprovementUI(delegate,output);
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
             emptyView=[delegate valueForKey:@"conversationEmptyView"]; emptyFits=YES;
             for (NSView *view in emptyView.subviews) if (!view.hidden && !NSContainsRect(emptyView.bounds,view.frame)) emptyFits=NO;

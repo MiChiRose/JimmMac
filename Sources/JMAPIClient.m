@@ -3,6 +3,7 @@
 #import "JMProtocol.h"
 #import "JMHTTPClient.h"
 #import <math.h>
+#import "JMDiagnostics.h"
 
 @interface JMAPIClient ()
 @property(nonatomic, strong) JMHTTPClient *network;
@@ -18,6 +19,7 @@
 @property(nonatomic) long long sequence;
 @property(nonatomic) NSUInteger failures;
 @property(nonatomic, strong) NSMutableArray *diagnosticEntries;
+@property(nonatomic,strong) NSDictionary *lastDiagnosticFailure;
 @property(nonatomic, strong) NSMutableDictionary *typingLastSent;
 @property(nonatomic, strong) NSMutableDictionary *typingPending;
 @property(nonatomic, strong) NSMutableSet *typingScheduled;
@@ -25,9 +27,16 @@
 @property(nonatomic) NSUInteger sessionSerial;
 @property(nonatomic) BOOL polling;
 @property(nonatomic, copy) NSString *preferredPresence;
+@property(nonatomic) NSUInteger presenceSerial;
+@property(nonatomic,strong) JMHTTPTask *presenceTask;
 @end
 
 @implementation JMAPIClient
+- (NSArray *)diagnosticSnapshot {
+    NSMutableArray *safe=[JMSafeDiagnosticEntries(self.diagnosticEntries ?: @[]) mutableCopy];
+    if (self.lastDiagnosticFailure && ![safe containsObject:self.lastDiagnosticFailure]) { if (safe.count>=20) [safe removeObjectAtIndex:0]; [safe insertObject:self.lastDiagnosticFailure atIndex:0]; } return safe;
+}
+- (BOOL)usesLegacyTransport { return self.network ? self.network.usesLegacyTransport : (NSClassFromString(@"NSURLSession")==Nil || [self useLegacyTransport]); }
 - (NSURL *)baseURL { return [NSURL URLWithString:@"https://jimm.online/webapi"]; }
 - (NSArray *)protocolClasses { return nil; }
 - (BOOL)useLegacyTransport { return NO; }
@@ -46,7 +55,9 @@
     // UIN, token, session ID, messages or NSError's userInfo.
     [self.diagnosticEntries addObject:@{@"endpoint":path, @"http":@(http), @"api":@(api),
         @"errorDomain":error.domain ?: @"", @"errorCode":@(error.code),
-        @"version":@"0.14.2", @"time":@([[NSDate date] timeIntervalSince1970])}];
+        @"version":@"0.15.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
+    self.diagnosticEntries=[JMSafeDiagnosticEntries(self.diagnosticEntries) mutableCopy];
+    NSDictionary *latest=self.diagnosticEntries.lastObject; if (error || http>=400 || api>=400) self.lastDiagnosticFailure=latest;
     if ([self.diagnosticEntries count] > 20) [self.diagnosticEntries removeObjectAtIndex:0];
     NSURL *root = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
     NSURL *directory = [root URLByAppendingPathComponent:@"JimmMac" isDirectory:YES];
@@ -126,7 +137,7 @@
     NSUInteger attempt = ++self.sessionSerial;
     [self status:JML(@"Подключаемся к Jimm.online…") connected:NO];
     [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,sessionEnded,rateLimit",
-                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.14.2", @"timeout":@"60"}
+                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.15.0", @"timeout":@"60"}
            timeout:30 completion:^(NSDictionary *data, NSError *error) {
         if (attempt != self.sessionSerial) return;
         if (error) {
@@ -302,7 +313,10 @@
     if (![@[@"online",@"away",@"dnd",@"occupied",@"invisible"] containsObject:state]) {
         completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:400 userInfo:@{NSLocalizedDescriptionKey:JML(@"Неизвестный статус.")}]); return;
     }
-    [self call:@"/presence/setState" parameters:@{@"aimsid":self.sessionID,@"view":state} timeout:20 completion:^(NSDictionary *data, NSError *error) {
+    NSUInteger serial=++self.presenceSerial; [self.presenceTask cancel];
+    self.presenceTask=[self call:@"/presence/setState" parameters:@{@"aimsid":self.sessionID,@"view":state} timeout:20 completion:^(NSDictionary *data, NSError *error) {
+        if (serial!=self.presenceSerial) { completion(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]); return; }
+        self.presenceTask=nil;
         if (error) { completion(nil,error); return; }
         self.preferredPresence=state;
         NSMutableDictionary *accepted=[data mutableCopy] ?: [NSMutableDictionary dictionary];
@@ -310,6 +324,7 @@
         // Never turn a verification failure into a failed mutation or retry it.
         if (!accepted[@"state"]) accepted[@"state"]=state;
         [self fetchPresenceForUIN:self.uin completion:^(NSDictionary *presence, NSError *readError) {
+            if (serial!=self.presenceSerial) { completion(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]); return; }
             NSDictionary *own=nil;
             for (NSDictionary *entry in JMArray(presence[@"users"])) {
                 NSDictionary *user=JMDictionary(entry);
@@ -408,7 +423,7 @@
     [self startSession];
 }
 - (void)disconnect {
-    self.generation++;
+    self.generation++; self.presenceSerial++; [self.presenceTask cancel]; self.presenceTask=nil;
     self.pollSerial++; self.polling = NO; self.sessionSerial++;
     NSString *sid = self.sessionID;
     [self.network invalidateAndCancel];

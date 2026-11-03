@@ -103,7 +103,7 @@ static NSButton *Button(NSString *title, NSRect frame, id target, SEL action) {
     self.saveButton.toolTip=JML(@"Сохранить изменённые поля и выбранную фотографию в Jimm.online (Cmd+S)"); [root addSubview:self.saveButton];
     [self.firstNameField setNextKeyView:self.lastNameField]; [self.lastNameField setNextKeyView:self.statusField];
     [self.statusField setNextKeyView:self.about]; [self.about setNextKeyView:self.saveButton];
-    [window center]; [self updateControls]; return self;
+    JMDecorateUtilityWindow(window,JML(@"Мой профиль")); [window center]; [self updateControls]; return self;
 }
 - (void)showFeedback:(NSString *)text { self.feedback.stringValue=text; self.feedback.toolTip=text; }
 - (BOOL)dirty { return self.loaded && (![self.firstNameField.stringValue isEqualToString:self.originalFirstName] || ![self.lastNameField.stringValue isEqualToString:self.originalLastName] || ![self.about.string isEqualToString:self.originalAbout] || ![self.statusField.stringValue isEqualToString:self.originalStatus] || self.pendingAvatar!=nil); }

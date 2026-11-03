@@ -147,5 +147,23 @@ NSImage *JMDecodeAvatar(NSData *data) {
     } else self.retryAfter[uin]=[NSDate dateWithTimeIntervalSinceNow:300];
     [self.delegate avatarStore:self updatedUIN:uin];
 }
+- (unsigned long long)cacheBytes {
+    unsigned long long bytes=0;
+    for (NSURL *file in [[NSFileManager defaultManager] contentsOfDirectoryAtURL:self.cacheDirectory includingPropertiesForKeys:nil options:0 error:NULL]) {
+        if (![file.pathExtension isEqual:@"image"] || !JMValidUIN(file.lastPathComponent.stringByDeletingPathExtension)) continue;
+        NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:file.path error:NULL]; if ([attrs[NSFileType] isEqual:NSFileTypeRegular]) bytes+=[attrs[NSFileSize] unsignedLongLongValue];
+    } return bytes;
+}
+- (BOOL)clearCache:(NSError **)error {
+    NSArray *tasks=self.pending.allValues; [self.pending removeAllObjects]; for (JMHTTPTask *task in tasks) [task cancel];
+    [self.images removeAllObjects]; [self.retryAfter removeAllObjects];
+    NSArray *files=[[NSFileManager defaultManager] contentsOfDirectoryAtURL:self.cacheDirectory includingPropertiesForKeys:nil options:0 error:error]; if (!files) return NO;
+    for (NSURL *file in files) {
+        if (![file.pathExtension isEqual:@"image"] || !JMValidUIN(file.lastPathComponent.stringByDeletingPathExtension)) continue;
+        NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:file.path error:NULL];
+        if (![attrs[NSFileType] isEqual:NSFileTypeRegular]) continue;
+        if (![[NSFileManager defaultManager] removeItemAtURL:file error:error]) return NO;
+    } return YES;
+}
 - (void)invalidate { [self.network invalidateAndCancel]; self.network=nil; self.delegate=nil; [self.pending removeAllObjects]; }
 @end

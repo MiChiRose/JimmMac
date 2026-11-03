@@ -164,7 +164,7 @@ NSColor *JMSelectionColor(BOOL emphasized) {
 - (void)layoutContents {
     CGFloat width=NSWidth(self.bounds), height=NSHeight(self.bounds)-[self groupHeaderHeight];
     BOOL person=[self.identifier isEqual:@"person"], compact=JMTheme()==JMThemePro2003 && person, mac=JMTheme()==JMThemeMac2011 && person;
-    self.imageView.hidden=compact; self.detailLabel.hidden=compact || (mac && !self.detailLabel.stringValue.length);
+    self.imageView.hidden=compact; self.detailLabel.hidden=compact || (mac && (!self.detailLabel.stringValue.length || height<32));
     CGFloat badgeWidth=self.badge.text.length ? MAX(18,[self.badge.text sizeWithAttributes:@{NSFontAttributeName:[NSFont boldSystemFontOfSize:10]}].width+10) : 0;
     if (compact) {
         self.presenceImage.frame=NSMakeRect(5,floor((height-16)/2),16,16);
@@ -181,9 +181,9 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     CGFloat stampWidth=self.timestampLabel.stringValue.length ? MAX(34,ceil([[self.timestampLabel cell] cellSize].width)+2) : 0;
     self.imageView.frame=NSMakeRect(10,floor((height-36)/2),36,36); self.presenceImage.frame=NSMakeRect(35,floor((height-36)/2)-3,16,16);
     self.timestampLabel.frame=NSMakeRect(width-12-stampWidth,height-25,stampWidth,17); self.timestampLabel.hidden=stampWidth==0;
-    self.textField.frame=NSMakeRect(56,height-27,MAX(0,width-68-(stampWidth ? stampWidth+8 : 0)),21);
-    self.detailLabel.frame=NSMakeRect(56,10,MAX(0,width-68-(badgeWidth ? badgeWidth+8 : 0)),17);
-    self.badge.frame=NSMakeRect(width-12-badgeWidth,10,badgeWidth,18); self.badge.hidden=badgeWidth==0;
+    self.textField.frame=NSMakeRect(56,height<50 ? height-22 : height-27,MAX(0,width-68-(stampWidth ? stampWidth+8 : 0)),21);
+    self.detailLabel.frame=NSMakeRect(56,height<50 ? 2 : 10,MAX(0,width-68-(badgeWidth ? badgeWidth+8 : 0)),17);
+    self.badge.frame=NSMakeRect(width-12-badgeWidth,height<50 ? 2 : 10,badgeWidth,18); self.badge.hidden=badgeWidth==0;
 }
 - (CGFloat)groupHeaderHeight { return self.groupTitle.length && [self.identifier isEqual:@"person"] && JMTheme()!=JMThemeCurrent ? (JMTheme()==JMThemePro2003 ? 17 : 21) : 0; }
 - (void)setGroupTitle:(NSString *)title { _groupTitle=[title copy]; [self layoutContents]; self.needsDisplay=YES; }
@@ -273,7 +273,7 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
 - (void)drawBezelWithFrame:(NSRect)frame inView:(NSView *)view {
     if (JMTheme()==JMThemeCurrent) { [super drawBezelWithFrame:frame inView:view]; return; }
     JMDrawControl(frame,self.isHighlighted || self.state==NSOnState,self.showsFirstResponder,self.isEnabled,view.isFlipped);
-    if (self.hovered && self.isEnabled && !self.isHighlighted) { [(JMTheme()==JMThemePro2003 ? JMColor(80,115,175) : JMColor(72,132,42)) setStroke]; NSBezierPath *edge=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(frame,1.5,1.5) xRadius:3 yRadius:3]; [edge stroke]; }
+    if (self.hovered && self.isEnabled && view.window.isKeyWindow && !self.isHighlighted) { [(JMTheme()==JMThemePro2003 ? JMColor(80,115,175) : JMColor(72,132,42)) setStroke]; NSBezierPath *edge=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(frame,1.5,1.5) xRadius:JMTheme()==JMThemePro2003 ? 3 : 1 yRadius:JMTheme()==JMThemePro2003 ? 3 : 1]; [edge stroke]; }
 }
 - (void)drawInteriorWithFrame:(NSRect)frame inView:(NSView *)view {
     if (JMTheme()==JMThemeCurrent) { [super drawInteriorWithFrame:frame inView:view]; return; }
@@ -344,11 +344,11 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
         NSFont *font=self.font ?: [NSFont systemFontOfSize:11]; NSMutableParagraphStyle *style=[[NSMutableParagraphStyle alloc] init]; style.alignment=NSCenterTextAlignment; style.lineBreakMode=NSLineBreakByTruncatingTail;
         NSImage *icon=[self imageForSegment:i]; NSString *title=[self labelForSegment:i]; CGFloat inset=5;
         if (icon) {
-            BOOL labeled=title.length>0; [icon drawInRect:labeled ? NSMakeRect(x+5,NSMidY(segment)-8,16,16) : NSMakeRect(NSMidX(segment)-9,NSMidY(segment)-9,18,18) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1 respectFlipped:YES hints:nil];
+            BOOL labeled=title.length>0; [icon drawInRect:labeled ? NSMakeRect(x+5,NSMidY(segment)-8,16,16) : NSMakeRect(NSMidX(segment)-9,NSMidY(segment)-9,18,18) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:self.isEnabled && [self isEnabledForSegment:i] ? 1 : 0.45 respectFlipped:YES hints:nil];
             if (!labeled) { x+=width; continue; } inset=25;
         }
         NSSize size=[title sizeWithAttributes:@{NSFontAttributeName:font}];
-        [title drawInRect:NSMakeRect(x+inset,NSMidY(frame)-ceil(size.height)/2,width-inset-5,ceil(size.height)) withAttributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:JMColor(31,46,37),NSParagraphStyleAttributeName:style}]; x+=width;
+        [title drawInRect:NSMakeRect(x+inset,NSMidY(frame)-ceil(size.height)/2,width-inset-5,ceil(size.height)) withAttributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:self.isEnabled && [self isEnabledForSegment:i] ? JMColor(31,46,37) : JMColor(112,118,127),NSParagraphStyleAttributeName:style}]; x+=width;
     }
 }
 @end
@@ -438,3 +438,39 @@ NSImage *JMClassicToolbarImage(NSString *name) {
     [[NSColor colorWithCalibratedWhite:1 alpha:0.9] setStroke]; [edge stroke];
 }
 @end
+
+#import <objc/runtime.h>
+static char JMUtilityHeaderKey, JMUtilityFontKey;
+@interface JMUtilityHeader : JMChromeView
+@property(nonatomic,copy) NSString *caption;
+@end
+@implementation JMUtilityHeader
+- (void)drawRect:(NSRect)rect {
+    self.topColor=JMLegacyHeaderTopColor(); self.bottomColor=JMLegacyHeaderBottomColor(); [super drawRect:rect];
+    [JMFlowerImage() drawInRect:NSMakeRect(16,10,24,24) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1];
+    [self.caption drawInRect:NSMakeRect(50,12,MAX(0,self.bounds.size.width-66),24) withAttributes:@{NSFontAttributeName:JMThemeFont([NSFont boldSystemFontOfSize:16],@""),NSForegroundColorAttributeName:[NSColor colorWithCalibratedWhite:0.12 alpha:1]}];
+}
+@end
+static void JMRefreshUtilityView(NSView *view) {
+    if ([view isKindOfClass:[NSControl class]] && ![view isKindOfClass:[NSTextView class]]) {
+        NSControl *control=(NSControl *)view; NSFont *base=objc_getAssociatedObject(control,&JMUtilityFontKey);
+        if (!base && control.font) { base=control.font; objc_setAssociatedObject(control,&JMUtilityFontKey,base,OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+        if (base && control.tag!=515) control.font=JMThemeFont(base,@"");
+    }
+    view.needsDisplay=YES; for (NSView *child in view.subviews) JMRefreshUtilityView(child);
+}
+void JMRefreshUtilityWindow(NSWindow *window) {
+    if (!window) return; window.backgroundColor=JMThemeBackground(); JMRefreshUtilityView(window.contentView);
+}
+void JMDecorateUtilityWindow(NSWindow *window,NSString *title) {
+    if (!window) return; NSView *root=window.contentView;
+    JMUtilityHeader *header=objc_getAssociatedObject(window,&JMUtilityHeaderKey);
+    if (!header) {
+        NSSize size=root.bounds.size; BOOL resize=root.autoresizesSubviews; root.autoresizesSubviews=NO;
+        [window setContentSize:NSMakeSize(size.width,size.height+44)]; root.autoresizesSubviews=resize;
+        if ((window.styleMask & NSResizableWindowMask)!=0) window.contentMinSize=NSMakeSize(window.contentMinSize.width,window.contentMinSize.height+44);
+        header=[[JMUtilityHeader alloc] initWithFrame:NSMakeRect(0,size.height,size.width,44)]; header.autoresizingMask=NSViewWidthSizable|NSViewMinYMargin;
+        [root addSubview:header positioned:NSWindowBelow relativeTo:nil]; objc_setAssociatedObject(window,&JMUtilityHeaderKey,header,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    header.caption=title; JMRefreshUtilityWindow(window);
+}

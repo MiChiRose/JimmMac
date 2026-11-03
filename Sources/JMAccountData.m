@@ -33,13 +33,14 @@ NSDictionary *JMSafeRoster(NSDictionary *roster) {
     for (NSString *uin in JMDictionary(roster[@"profiles"])) if (JMValidUIN(uin) && [roster[@"profiles"][uin] isKindOfClass:[NSString class]] && [roster[@"profiles"][uin] length]<=65536) profiles[uin]=roster[@"profiles"][uin];
     return @{@"contacts":contacts,@"groups":groups,@"serverIDs":UINs(roster[@"serverIDs"]),@"profiles":profiles,@"ownInfo":SafeContact(JMDictionary(roster[@"ownInfo"]),JMString(roster[@"uin"])),@"uin":JMString(roster[@"uin"])};
 }
-static NSArray *GlobalKeys(void) { return @[@"ChatFontFamily",@"ChatFontSize",@"ChatSendWithCommandReturn",@"ChatEmoticonsEnabled",@"InterfaceLanguage",@"InterfaceAppearance",@"NotificationsEnabled",@"NotificationContentStyle",@"DockAttentionEnabled",@"SoundsEnabled",@"PresenceSoundsEnabled",@"TypingSoundsEnabled",@"SoundInOpenConversation",@"AutomaticallyCheckUpdates"]; }
+static NSArray *GlobalKeys(void) { return @[@"CompactContactList",@"AutoAwayMinutes",@"ChatFontFamily",@"ChatFontSize",@"ChatSendWithCommandReturn",@"ChatEmoticonsEnabled",@"InterfaceLanguage",@"InterfaceAppearance",@"NotificationsEnabled",@"NotificationContentStyle",@"DockAttentionEnabled",@"SoundsEnabled",@"PresenceSoundsEnabled",@"TypingSoundsEnabled",@"SoundInOpenConversation",@"AutomaticallyCheckUpdates"]; }
 static NSArray *AccountKeys(void) { return @[@"FavoritePeers",@"MutedPeers",@"ConversationPeers",@"OnlineOnly",@"FavoritesOnly"]; }
 NSDictionary *JMSafePreferences(NSDictionary *preferences) {
     NSMutableDictionary *safe=[NSMutableDictionary dictionary];
     for (NSString *key in GlobalKeys()) {
         id value=preferences[key]; if (!value) continue;
         if ([key isEqual:@"ChatFontFamily"]) { if ([value isKindOfClass:[NSString class]] && [value length]<=256) safe[key]=value; }
+        else if ([key isEqual:@"AutoAwayMinutes"]) { if ([value isKindOfClass:[NSNumber class]] && [@[@0,@5,@10,@15,@30,@60] containsObject:value]) safe[key]=value; }
         else if ([key isEqual:@"ChatFontSize"]) { if ([value isKindOfClass:[NSNumber class]] && isfinite([value doubleValue]) && [value doubleValue]>=9 && [value doubleValue]<=28) safe[key]=value; }
         else if ([key isEqual:@"InterfaceLanguage"]) { if ([@[@"ru",@"en"] containsObject:value]) safe[key]=value; }
         else if ([key isEqual:@"InterfaceAppearance"]) { if ([@[@"current",@"mac2011",@"pro2003"] containsObject:value]) safe[key]=value; }

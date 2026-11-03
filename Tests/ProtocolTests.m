@@ -12,6 +12,8 @@
 #import "JMLoginStore.h"
 #import <sys/stat.h>
 #import <sqlite3.h>
+#import "JMDiagnostics.h"
+#import "JMAutoAway.h"
 
 static NSUInteger checks = 0;
 static void Check(BOOL condition, NSString *name) {
@@ -23,6 +25,8 @@ static void Pump(NSTimeInterval duration) {
     NSDate *end = [NSDate dateWithTimeIntervalSinceNow:duration];
     while ([end timeIntervalSinceNow] > 0) [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
+
+#include "ImprovementChecks.inc"
 
 // Exercises the real NSURLSession request/response path without an account or Internet access.
 static NSMutableArray *requests;
@@ -194,6 +198,7 @@ static NSURLRequest *updateFixtureRequest;
 
 int main(void) {
     @autoreleasepool {
+        ImprovementChecks();
         NSString *linked=@"Сайт https://jimm.online/developers, почта test@example.com.";
         NSArray *links=JMLinksInText(linked);
         Check(links.count==2 && [[(NSTextCheckingResult *)links[0] URL].host isEqualToString:@"jimm.online"] && [[(NSTextCheckingResult *)links[1] URL].scheme isEqualToString:@"mailto"],@"native link detector supports web addresses and email");
@@ -318,7 +323,9 @@ int main(void) {
         Check([[[migrated messageWithID:@"local-pending" peer:@"222"] objectForKey:@"delivery"] isEqual:@"unknown"],@"interrupted pending send becomes unknown on restart, without automatic retry");
         NSMutableDictionary *echo=[pending mutableCopy]; echo[@"id"]=@"server-id"; [echo removeObjectForKey:@"delivery"];
         [migrated appendMessage:echo error:NULL]; NSUInteger beforeConfirm=[migrated countForPeer:@"222"];
+        Check([migrated setBookmarked:YES identifier:@"local-pending" peer:@"222" error:NULL],@"pending outgoing message can be bookmarked");
         Check([migrated confirmLocalID:@"local-pending" peer:@"222" message:echo error:NULL] && [migrated countForPeer:@"222"]==beforeConfirm-1 && [[[migrated messageWithID:@"server-id" peer:@"222"] objectForKey:@"delivery"] isEqual:@"accepted"],@"confirmation reconciles already received echo without duplicate outgoing row");
+        Check([migrated isBookmarkedID:@"server-id" peer:@"222"] && ![migrated isBookmarkedID:@"local-pending" peer:@"222"],@"bookmark follows outgoing confirmation from local ID to server ID");
         Check([migrated messagesForPeer:@"222" offset:1 limit:2].count==2 && [migrated indexOfMessage:@"durable-unread" peer:@"222"]==[migrated countForPeer:@"222"]-1,@"bounded pages and indexed jump keep full ordered history");
         NSURL *html=[root URLByAppendingPathComponent:@"export.html"], *txt=[root URLByAppendingPathComponent:@"export.txt"];
         Check([migrated exportPeer:@"222" name:@"<Friend>" account:@"444" html:YES toURL:html error:NULL] && [migrated exportPeer:@"222" name:@"<Friend>" account:@"444" html:NO toURL:txt error:NULL],@"both export formats write full conversation");
@@ -502,6 +509,11 @@ int main(void) {
         [client reconnect]; Pump(0.6);
         Check(client.connected && CountRequests(@"/startSession")==startsBefore+1 && [delegate.lastStatus hasPrefix:@"Подключено"],@"manual reconnect survives cancelled stale long poll");
         Check(CountRequests(@"/setState")==statesBefore+1 && [delegate.ownInfo[@"state"] isEqualToString:@"away"],@"acknowledged presence is restored after reconnect");
+        __block BOOL cancelledPresence=NO, newestPresence=NO; ownReadState=@"dnd";
+        [client setPresenceState:@"away" completion:^(NSDictionary *data,NSError *e) { cancelledPresence=[e.domain isEqual:NSURLErrorDomain] && e.code==NSURLErrorCancelled; }];
+        [client setPresenceState:@"dnd" completion:^(NSDictionary *data,NSError *e) { newestPresence=!e && [data[@"state"] isEqual:@"dnd"]; }]; Pump(0.5);
+        Check(cancelledPresence && newestPresence && [delegate.ownInfo[@"state"] isEqual:@"dnd"],@"new manual presence cancels an older in-flight mutation on the actual HTTP transport");
+        ownReadState=@"away"; [client setPresenceState:@"away" completion:^(NSDictionary *data,NSError *e) {}]; Pump(0.3);
         __block BOOL sendOK = NO;
         [client sendText:@"Тест & +" to:@"222" completion:^(NSDictionary *data, NSError *sendError) { sendOK = !sendError && [data[@"msgId"] isEqualToString:@"sent-1"]; }]; Pump(0.5);
         Check(sendOK, @"sendIM transport integration");

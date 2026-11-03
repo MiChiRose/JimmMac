@@ -37,6 +37,8 @@
 - (void)uploadOwnAvatar:(NSData *)jpeg completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)setPresenceState:(NSString *)state completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)setTypingStatus:(NSString *)status forUIN:(NSString *)uin;
+- (NSArray *)diagnosticSnapshot;
+- (BOOL)usesLegacyTransport;
 - (void)reconnect;
 - (void)disconnect;
 @end

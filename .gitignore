@@ -4,6 +4,9 @@ build-dev/
 build-dev-tests/
 build-design/
 build-design-tests/
+build-015/
+build-015-tests/
+build-015-protocol/
 build-update/
 build-compat/
 build-verify/

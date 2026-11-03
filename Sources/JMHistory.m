@@ -45,7 +45,7 @@ static void Contains(sqlite3_context *context,int argc,sqlite3_value **values) {
     sqlite3_stmt *check=NULL;
     BOOL valid=sqlite3_prepare_v2(_database,"PRAGMA quick_check",-1,&check,NULL)==SQLITE_OK && sqlite3_step(check)==SQLITE_ROW && [SQLText(check,0) isEqualToString:@"ok"];
     sqlite3_finalize(check);
-    if (!valid || ![self execute:@"PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE IF NOT EXISTS messages(peer TEXT NOT NULL,id TEXT NOT NULL,ts REAL NOT NULL,outgoing INTEGER NOT NULL,unread INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT '',text TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(peer,id)); CREATE INDEX IF NOT EXISTS message_order ON messages(peer,ts,id); CREATE INDEX IF NOT EXISTS unread_order ON messages(unread,peer,ts,id);" error:&error]) { self.loadError=error ?: HistoryError(); return self; }
+    if (!valid || ![self execute:@"PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE IF NOT EXISTS messages(peer TEXT NOT NULL,id TEXT NOT NULL,ts REAL NOT NULL,outgoing INTEGER NOT NULL,unread INTEGER NOT NULL DEFAULT 0,state TEXT NOT NULL DEFAULT '',text TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(peer,id)); CREATE TABLE IF NOT EXISTS bookmarks(peer TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(peer,id)); CREATE INDEX IF NOT EXISTS message_order ON messages(peer,ts,id); CREATE INDEX IF NOT EXISTS unread_order ON messages(unread,peer,ts,id);" error:&error]) { self.loadError=error ?: HistoryError(); return self; }
     sqlite3_stmt *marker=NULL; sqlite3_prepare_v2(_database,"SELECT value FROM metadata WHERE key='migration'",-1,&marker,NULL);
     BOOL migrated=sqlite3_step(marker)==SQLITE_ROW; sqlite3_finalize(marker);
     if (!migrated) {
@@ -115,11 +115,66 @@ static void Contains(sqlite3_context *context,int argc,sqlite3_value **values) {
     return hits.count>limit ? [hits subarrayWithRange:NSMakeRange(0,limit)] : hits;
 }
 - (NSArray *)searchQuery:(NSString *)query peer:(NSString *)peer limit:(NSUInteger)limit {
-    if (!query.length || !limit || self.loadError) return @[]; sqlite3 *reader=NULL;
+    if (!query.length) return @[];
+    return [self searchQuery:query peer:peer from:nil until:nil bookmarked:NO limit:limit];
+}
+- (NSArray *)searchQuery:(NSString *)query peer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until bookmarked:(BOOL)bookmarked limit:(NSUInteger)limit {
+    if (!limit || self.loadError || (from && until && [from compare:until]!=NSOrderedAscending)) return @[]; sqlite3 *reader=NULL;
     if (sqlite3_open_v2(self.path.fileSystemRepresentation,&reader,SQLITE_OPEN_READONLY|SQLITE_OPEN_FULLMUTEX,NULL)!=SQLITE_OK) { if (reader) sqlite3_close(reader); return @[]; }
-    sqlite3_create_function(reader,"jm_contains",2,SQLITE_UTF8,NULL,Contains,NULL,NULL);
-    NSString *sql=[NSString stringWithFormat:@"SELECT payload,state FROM messages WHERE %@jm_contains(text,?) ORDER BY ts DESC,peer,id LIMIT %llu",peer.length ? @"peer=? AND " : @"",(unsigned long long)limit];
-    NSArray *rows=[self query:sql strings:peer.length ? @[peer,query] : @[query] database:reader]; sqlite3_close(reader); return rows;
+    sqlite3_busy_timeout(reader,3000); sqlite3_create_function(reader,"jm_contains",2,SQLITE_UTF8,NULL,Contains,NULL,NULL);
+    NSMutableArray *conditions=[NSMutableArray array], *values=[NSMutableArray array];
+    if (peer.length) { [conditions addObject:@"peer=?"]; [values addObject:peer]; }
+    if (query.length) { [conditions addObject:@"jm_contains(text,?)"]; [values addObject:query]; }
+    if (from) { [conditions addObject:@"ts>=CAST(? AS REAL)"]; [values addObject:[NSString stringWithFormat:@"%.6f",from.timeIntervalSince1970]]; }
+    if (until) { [conditions addObject:@"ts<CAST(? AS REAL)"]; [values addObject:[NSString stringWithFormat:@"%.6f",until.timeIntervalSince1970]]; }
+    if (bookmarked) [conditions addObject:@"EXISTS(SELECT 1 FROM bookmarks b WHERE b.peer=messages.peer AND b.id=messages.id)"];
+    NSString *sql=[NSString stringWithFormat:@"SELECT payload,state FROM messages %@ ORDER BY ts DESC,peer,id LIMIT %llu",conditions.count ? [@"WHERE " stringByAppendingString:[conditions componentsJoinedByString:@" AND "]] : @"",(unsigned long long)limit];
+    NSArray *rows=[self query:sql strings:values database:reader]; sqlite3_close(reader); return rows;
+}
+- (BOOL)isBookmarkedID:(NSString *)identifier peer:(NSString *)peer {
+    sqlite3_stmt *s=NULL; BOOL yes=NO;
+    if (sqlite3_prepare_v2(_database,"SELECT 1 FROM bookmarks WHERE peer=? AND id=?",-1,&s,NULL)==SQLITE_OK) { Bind(s,1,peer); Bind(s,2,identifier); yes=sqlite3_step(s)==SQLITE_ROW; } sqlite3_finalize(s); return yes;
+}
+- (BOOL)setBookmarked:(BOOL)value identifier:(NSString *)identifier peer:(NSString *)peer error:(NSError **)error {
+    if (self.loadError || ![self messageWithID:identifier peer:peer]) { if (error) *error=HistoryError(); return NO; }
+    sqlite3_stmt *s=NULL; BOOL ok=sqlite3_prepare_v2(_database,value ? "INSERT OR IGNORE INTO bookmarks(peer,id) VALUES(?,?)" : "DELETE FROM bookmarks WHERE peer=? AND id=?",-1,&s,NULL)==SQLITE_OK;
+    if (ok) { Bind(s,1,peer); Bind(s,2,identifier); ok=sqlite3_step(s)==SQLITE_DONE; } sqlite3_finalize(s); if (!ok && error) *error=HistoryError(); return ok;
+}
+- (NSDictionary *)firstMessageForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until {
+    if (!from || !until || !peer.length) return nil;
+    return [[self query:@"SELECT payload,state FROM messages WHERE peer=? AND ts>=CAST(? AS REAL) AND ts<CAST(? AS REAL) ORDER BY ts,id LIMIT 1" strings:@[peer,[NSString stringWithFormat:@"%.6f",from.timeIntervalSince1970],[NSString stringWithFormat:@"%.6f",until.timeIntervalSince1970]] database:_database] firstObject];
+}
+- (NSUInteger)countMessagesForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until {
+    if (!from || !until || self.loadError) return 0; sqlite3_stmt *s=NULL; NSUInteger count=0;
+    if (sqlite3_prepare_v2(_database,peer.length ? "SELECT count(*) FROM messages WHERE ts>=? AND ts<? AND peer=?" : "SELECT count(*) FROM messages WHERE ts>=? AND ts<?",-1,&s,NULL)==SQLITE_OK) {
+        sqlite3_bind_double(s,1,from.timeIntervalSince1970); sqlite3_bind_double(s,2,until.timeIntervalSince1970); if (peer.length) Bind(s,3,peer); if (sqlite3_step(s)==SQLITE_ROW) count=(NSUInteger)sqlite3_column_int64(s,0);
+    } sqlite3_finalize(s); return count;
+}
+- (NSDictionary *)storageStatistics {
+    if (self.loadError || !self.path.length) return @{@"bytes":@0,@"legacyBytes":@0,@"messages":@0};
+    unsigned long long bytes=0; NSFileManager *fm=[NSFileManager defaultManager];
+    for (NSString *suffix in @[@"",@"-wal",@"-shm"]) bytes+=[[[fm attributesOfItemAtPath:[self.path stringByAppendingString:suffix] error:NULL] objectForKey:NSFileSize] unsignedLongLongValue];
+    NSString *legacy=[[self.path stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"history.json"];
+    unsigned long long original=[[[fm attributesOfItemAtPath:legacy error:NULL] objectForKey:NSFileSize] unsignedLongLongValue];
+    sqlite3_stmt *s=NULL; NSUInteger count=0;
+    if (sqlite3_prepare_v2(_database,"SELECT count(*) FROM messages",-1,&s,NULL)==SQLITE_OK && sqlite3_step(s)==SQLITE_ROW) count=(NSUInteger)sqlite3_column_int64(s,0); sqlite3_finalize(s);
+    return @{@"bytes":@(bytes),@"legacyBytes":@(original),@"messages":@(count)};
+}
+- (BOOL)deleteMessagesForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until error:(NSError **)error { return [self deleteMessagesForPeer:peer from:from until:until backupURL:nil manifest:nil error:error]; }
+- (BOOL)deleteMessagesForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until backupURL:(NSURL *)url manifest:(NSDictionary *)manifest error:(NSError **)error {
+    if (self.loadError || !from || !until || [from compare:until]!=NSOrderedAscending) { if (error) *error=HistoryError(); return NO; }
+    sqlite3 *writer=NULL; sqlite3_stmt *s=NULL;
+    BOOL ok=sqlite3_open_v2(self.path.fileSystemRepresentation,&writer,SQLITE_OPEN_READWRITE|SQLITE_OPEN_FULLMUTEX,NULL)==SQLITE_OK;
+    if (ok) { sqlite3_busy_timeout(writer,3000); ok=sqlite3_exec(writer,"BEGIN IMMEDIATE",NULL,NULL,NULL)==SQLITE_OK; }
+    // Hold the write reservation across snapshot + deletion. Incoming events are
+    // saved after commit (or retried unacknowledged), never deleted outside the backup.
+    if (ok && url) ok=[self writeBackupToURL:url manifest:manifest error:error];
+    if (ok) ok=sqlite3_prepare_v2(writer,peer.length ? "DELETE FROM messages WHERE ts>=? AND ts<? AND peer=?" : "DELETE FROM messages WHERE ts>=? AND ts<?",-1,&s,NULL)==SQLITE_OK;
+    if (ok) { sqlite3_bind_double(s,1,from.timeIntervalSince1970); sqlite3_bind_double(s,2,until.timeIntervalSince1970); if (peer.length) Bind(s,3,peer); ok=sqlite3_step(s)==SQLITE_DONE; } sqlite3_finalize(s);
+    if (ok) ok=sqlite3_exec(writer,"DELETE FROM bookmarks WHERE NOT EXISTS(SELECT 1 FROM messages m WHERE m.peer=bookmarks.peer AND m.id=bookmarks.id); COMMIT",NULL,NULL,NULL)==SQLITE_OK;
+    if (ok) { sqlite3_exec(writer,"PRAGMA wal_checkpoint; VACUUM; PRAGMA wal_checkpoint",NULL,NULL,NULL); }
+    else if (writer) sqlite3_exec(writer,"ROLLBACK",NULL,NULL,NULL);
+    if (writer) sqlite3_close(writer); if (!ok && error && !*error) *error=HistoryError(); return ok;
 }
 - (BOOL)appendMessage:(NSDictionary *)message error:(NSError **)error { return [self appendMessage:message unread:NO error:error]; }
 - (BOOL)appendMessage:(NSDictionary *)message unread:(BOOL)unread error:(NSError **)error {
@@ -150,11 +205,17 @@ static void Contains(sqlite3_context *context,int argc,sqlite3_value **values) {
 }
 - (BOOL)confirmLocalID:(NSString *)identifier peer:(NSString *)peer message:(NSDictionary *)message error:(NSError **)error {
     if (![self execute:@"BEGIN IMMEDIATE" error:error]) return NO;
+    BOOL bookmarked=[self isBookmarkedID:identifier peer:peer];
     sqlite3_stmt *s=NULL; BOOL ok=sqlite3_prepare_v2(_database,"DELETE FROM messages WHERE peer=? AND id=?",-1,&s,NULL)==SQLITE_OK;
-    if (ok) { Bind(s,1,peer); Bind(s,2,identifier); ok=sqlite3_step(s)==SQLITE_DONE; } sqlite3_finalize(s);
+    if (ok) { Bind(s,1,peer); Bind(s,2,identifier); ok=sqlite3_step(s)==SQLITE_DONE; } sqlite3_finalize(s); s=NULL;
     NSMutableDictionary *confirmed=[message mutableCopy]; confirmed[@"delivery"]=@"accepted";
     if (ok) ok=[self appendMessage:confirmed error:error];
     if (ok) ok=[self setDelivery:@"accepted" forID:message[@"id"] peer:peer error:error];
+    if (ok && bookmarked) {
+        ok=[self setBookmarked:YES identifier:message[@"id"] peer:peer error:error];
+        if (ok) ok=sqlite3_prepare_v2(_database,"DELETE FROM bookmarks WHERE peer=? AND id=? AND id!=?",-1,&s,NULL)==SQLITE_OK;
+        if (ok) { Bind(s,1,peer); Bind(s,2,identifier); Bind(s,3,message[@"id"]); ok=sqlite3_step(s)==SQLITE_DONE; } sqlite3_finalize(s);
+    }
     if (ok) ok=[self execute:@"COMMIT" error:error]; if (!ok) { [self execute:@"ROLLBACK" error:NULL]; if (error && !*error) *error=HistoryError(); } return ok;
 }
 - (BOOL)exportPeer:(NSString *)peer name:(NSString *)name account:(NSString *)account html:(BOOL)html toURL:(NSURL *)url error:(NSError **)error {
@@ -249,7 +310,17 @@ static void Contains(sqlite3_context *context,int argc,sqlite3_value **values) {
         }
     }}
     if (result!=SQLITE_DONE) ok=NO;
-    sqlite3_finalize(s); if (reader) sqlite3_close(reader);
+    sqlite3_finalize(s); s=NULL;
+    sqlite3_stmt *check=NULL; BOOL hasBookmarks=sqlite3_prepare_v2(reader,"SELECT 1 FROM sqlite_master WHERE name='bookmarks' AND type='table' AND sql NOT LIKE '%VIRTUAL%'",-1,&check,NULL)==SQLITE_OK && sqlite3_step(check)==SQLITE_ROW; sqlite3_finalize(check);
+    if (ok && hasBookmarks) {
+        ok=sqlite3_prepare_v2(reader,"SELECT peer,id FROM bookmarks",-1,&s,NULL)==SQLITE_OK;
+        while (ok && (result=sqlite3_step(s))==SQLITE_ROW) {
+            NSString *peer=SQLText(s,0), *identifier=SQLText(s,1);
+            if ([self messageWithID:identifier peer:peer]) ok=[self setBookmarked:YES identifier:identifier peer:peer error:error];
+        }
+        if (ok && result!=SQLITE_DONE) ok=NO; sqlite3_finalize(s);
+    }
+    if (reader) sqlite3_close(reader);
     if (ok) ok=[self execute:@"COMMIT" error:error];
     if (!ok) { [self execute:@"ROLLBACK" error:NULL]; if (error && !*error) *error=HistoryError(); return NSNotFound; } return count;
 }

@@ -12,6 +12,14 @@
 - (NSDictionary *)searchSnapshot;
 + (NSArray *)searchSnapshot:(NSDictionary *)snapshot query:(NSString *)query peer:(NSString *)peer limit:(NSUInteger)limit;
 - (NSArray *)searchQuery:(NSString *)query peer:(NSString *)peer limit:(NSUInteger)limit;
+- (NSArray *)searchQuery:(NSString *)query peer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until bookmarked:(BOOL)bookmarked limit:(NSUInteger)limit;
+- (BOOL)isBookmarkedID:(NSString *)identifier peer:(NSString *)peer;
+- (BOOL)setBookmarked:(BOOL)value identifier:(NSString *)identifier peer:(NSString *)peer error:(NSError **)error;
+- (NSDictionary *)firstMessageForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until;
+- (NSUInteger)countMessagesForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until;
+- (NSDictionary *)storageStatistics;
+- (BOOL)deleteMessagesForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until error:(NSError **)error;
+- (BOOL)deleteMessagesForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until backupURL:(NSURL *)url manifest:(NSDictionary *)manifest error:(NSError **)error;
 - (BOOL)appendMessage:(NSDictionary *)message error:(NSError **)error;
 - (BOOL)appendMessage:(NSDictionary *)message unread:(BOOL)unread error:(NSError **)error;
 - (NSDictionary *)unreadCounts;
