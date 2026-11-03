@@ -7,6 +7,8 @@ typedef void (^JMHTTPCompletion)(NSData *, NSURLResponse *, NSError *);
 @property(nonatomic) NSUInteger maximumResponseBytes;
 @property(nonatomic) NSTimeInterval resourceTimeout;
 @property(nonatomic) BOOL allowsSameOriginRedirects;
+// Only the public GitHub updater may opt into its bundled additional root.
+@property(nonatomic) BOOL githubUpdateTrust;
 @property(nonatomic, copy) BOOL (^responseValidator)(NSURLResponse *);
 @property(nonatomic, readonly) BOOL usesLegacyTransport;
 - (id)initWithProtocolClasses:(NSArray *)classes legacy:(BOOL)legacy;

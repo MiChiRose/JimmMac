@@ -51,7 +51,7 @@ NSMutableURLRequest *JMRequest(NSURL *baseURL, NSString *path, NSDictionary *par
     }
     [request setValue:@"no-store" forHTTPHeaderField:@"Cache-Control"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-    [request setValue:@"JimmMac/0.12 (OS X 10.8-macOS 10.13; Intel)" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"JimmMac/0.13 (OS X 10.8-macOS 10.13; Intel)" forHTTPHeaderField:@"User-Agent"];
     return request;
 }
 static NSError *JMError(NSInteger code, NSString *message, NSTimeInterval retry) {

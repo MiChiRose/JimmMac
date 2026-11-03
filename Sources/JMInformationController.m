@@ -30,7 +30,7 @@ static NSButton *Button(NSString *text, NSRect frame, id target, SEL action) {
     JMChromeView *header=[[JMChromeView alloc] initWithFrame:NSMakeRect(0,height-96,560,96)];
     header.topColor=JMLegacyHeaderTopColor(); header.bottomColor=JMLegacyHeaderBottomColor(); [root addSubview:header];
     NSImageView *flower=[[NSImageView alloc] initWithFrame:NSMakeRect(24,20,56,56)]; flower.image=JMFlowerImage(); flower.imageScaling=NSImageScaleProportionallyUpOrDown; [header addSubview:flower];
-    NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.12.0";
+    NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.13.0";
     [header addSubview:Label(keyboardHelp ? @"JimmMac с клавиатуры" : [@"JimmMac " stringByAppendingString:version],NSMakeRect(96,48,438,28),21,YES)];
     [header addSubview:Label(@"Ваша аська на Mac · Jimm.online",NSMakeRect(97,22,438,20),12,NO)];
     if (keyboardHelp) {

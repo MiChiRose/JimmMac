@@ -14,6 +14,8 @@
 #import "JMInformationController.h"
 #import "JMKeyboard.h"
 #import "JMHTTPClient.h"
+#import "JMEmoticons.h"
+#import "JMUpdateChecker.h"
 @interface JMHTTPTask (TransportProbe)
 - (BOOL)allowsRedirect:(NSURLRequest *)request;
 @end
@@ -24,6 +26,23 @@
 #import <math.h>
 
 @interface JMAppDelegate (SmokeAccess)
+- (void)loadEarlierMessages:(id)sender;
+- (void)loadNewerMessages:(id)sender;
+- (void)setTranscriptAroundID:(NSString *)identifier;
+- (void)renderTranscript;
+- (void)toggleFavorite:(id)sender;
+- (void)toggleOnlineFilter:(id)sender;
+- (void)toggleFavoritesFilter:(id)sender;
+- (void)toggleEmoticons:(id)sender;
+- (void)transmitRecord:(NSDictionary *)record clearsDraft:(BOOL)clearsDraft;
+- (NSDictionary *)draftSnapshot;
+- (void)scheduleAutomaticUpdateChecks;
+- (void)toggleAutomaticUpdates:(id)sender;
+- (void)automaticUpdateTick:(id)sender;
+- (void)checkUpdatesAutomatically:(BOOL)automatic;
+- (void)presentPendingUpdateIfPossible;
+- (BOOL)canPresentAutomaticUpdate;
+- (void)presentUpdateRelease:(NSDictionary *)release automatic:(BOOL)automatic;
 - (void)selectPeer:(NSString *)peer;
 - (void)about:(id)sender;
 - (void)showKeyboardHelp:(id)sender;
@@ -104,6 +123,14 @@
 - (void)revertAvatar:(id)sender;
 - (void)edited;
 @end
+@interface UIUpdateChecker : JMUpdateChecker
+@property(nonatomic,strong) NSDictionary *releaseInfo;
+@property(nonatomic,strong) NSError *error;
+@property(nonatomic) NSUInteger checks;
+@end
+@implementation UIUpdateChecker
+- (void)check:(void (^)(NSDictionary *,NSError *))completion { self.checks++; completion(self.releaseInfo,self.error); }
+@end
 static NSUserDefaults *testAlertDefaults;
 static NSURL *testDraftRoot;
 @interface FakeLoginStore : JMLoginStore
@@ -129,6 +156,10 @@ static NSURL *testDraftRoot;
 - (BOOL)removeLoginForUIN:(NSString *)uin error:(NSError **)error { self.removals++; if (self.failure) { if (error) *error=self.failure; return NO; } [self.records removeObjectForKey:uin]; return YES; }
 @end
 @interface SmokeDelegate : JMAppDelegate
+@property(nonatomic) NSUInteger terminationReplies;
+@property(nonatomic,strong) NSNumber *allowUpdatePresentation;
+@property(nonatomic,copy) NSString *presentedUpdateVersion;
+@property(nonatomic) NSUInteger automaticUpdateNotices;
 @property(nonatomic, strong) NSURL *openedURL;
 @property(nonatomic, copy) NSString *lastError;
 @property(nonatomic, strong) NSNumber *forcedReading;
@@ -186,6 +217,10 @@ static NSURL *testDraftRoot;
 - (void)storeUploadedAvatar:(NSData *)data forUIN:(NSString *)uin { self.fixtureImage=JMDecodeAvatar(data); self.savedImages++; }
 @end
 @implementation SmokeDelegate
+- (void)completeTermination { self.terminationReplies++; }
+- (void)scheduleAutomaticUpdateChecks {} // No real update requests during fictional UI tests.
+- (BOOL)canPresentAutomaticUpdate { return self.allowUpdatePresentation ? self.allowUpdatePresentation.boolValue : [super canPresentAutomaticUpdate]; }
+- (void)presentUpdateRelease:(NSDictionary *)release automatic:(BOOL)automatic { self.presentedUpdateVersion=release[@"version"]; if (automatic) self.automaticUpdateNotices++; }
 - (BOOL)openExternalURL:(NSURL *)url { self.openedURL=url; return YES; }
 - (void)showError:(NSString *)title detail:(NSString *)detail { self.lastError=detail; }
 - (JMLoginStore *)makeLoginStore { return [[FakeLoginStore alloc] init]; }
@@ -201,7 +236,7 @@ static NSURL *testDraftRoot;
 - (BOOL)isReadingConversation {
     if (!self.forcedReading) return [super isReadingConversation];
     NSWindow *window=[self valueForKey:@"chatWindow"]; NSTextView *view=[self valueForKey:@"transcript"];
-    return self.forcedReading.boolValue && window.isVisible && !window.isMiniaturized && NSMaxY(view.enclosingScrollView.contentView.bounds)>=NSHeight(view.bounds)-24;
+    return self.forcedReading.boolValue && ![[self valueForKey:@"renderingTranscript"] boolValue] && [[self valueForKey:@"transcriptOffset"] unsignedIntegerValue]+200>=[(JMHistory *)[self valueForKey:@"history"] countForPeer:[self valueForKey:@"selectedPeer"] ?: @""] && window.isVisible && !window.isMiniaturized && NSMaxY(view.enclosingScrollView.contentView.bounds)>=NSHeight(view.bounds)-24;
 }
 - (void)showMainWindow:(id)sender { self.showWindowCount++; [super showMainWindow:sender]; }
 @end
@@ -1193,6 +1228,76 @@ int main(int argc, const char *argv[]) {
                     [delegate selectPeer:@"666"]; Draft(delegate,composer,@""); [delegate selectPeer:@"777"]; Draft(delegate,composer,@"");
                 } @finally { RestoreClipboard(clipboard); }
             }
+            // 0.13: isolated durable history, bounded pages and local display preferences.
+            JMHistory *daily=[[JMHistory alloc] initWithUIN:@"12345" root:root];
+            for (NSUInteger i=0;i<450;i++) [daily appendMessage:@{@"peer":@"666",@"id":[NSString stringWithFormat:@"page-%03lu",(unsigned long)i],@"text":[NSString stringWithFormat:@"Сообщение %lu :)",(unsigned long)i],@"timestamp":@(1793340000+i),@"outgoing":@NO} unread:i>=120 error:NULL];
+            [delegate setValue:daily forKey:@"history"]; [delegate setValue:@"12345" forKey:@"accountUIN"]; [delegate setValue:nil forKey:@"selectedPeer"];
+            [[delegate valueForKey:@"unread"] removeAllObjects]; [[delegate valueForKey:@"unread"] addEntriesFromDictionary:daily.unreadCounts];
+            [[delegate valueForKey:@"favoritePeers"] removeAllObjects];
+            [delegate client:client receivedBuddyList:@{@"groups":@[@{@"name":@"Тест",@"buddies":@[@{@"aimId":@"666",@"friendly":@"Анна",@"state":@"online"},@{@"aimId":@"777",@"friendly":@"Борис",@"state":@"offline"},@{@"aimId":@"888",@"friendly":@"Вера",@"state":@"away"}]}]}];
+            [sections setSelectedSegment:0]; [delegate changeSection:nil];
+            delegate.forcedReading=@YES; client.fixtureConnected=YES; [chat makeKeyAndOrderFront:nil]; [delegate selectPeer:@"666"];
+            CheckUI([[delegate valueForKey:@"transcriptRanges"] count]==200 && [[delegate valueForKey:@"transcriptOffset"] unsignedIntegerValue]==80,"first unread opens correct bounded page instead of rendering 450 messages");
+            CheckUI([daily.unreadCounts[@"666"] integerValue]==330 && [linkedTranscript.string rangeOfString:@"Непрочитанные"].location!=NSNotFound,"opening first unread does not clear unseen later messages");
+            CheckUI([[delegate valueForKey:@"olderMessagesButton"] isEnabled] && [[delegate valueForKey:@"newerMessagesButton"] isEnabled],"history page controls expose earlier and later ranges");
+            [delegate loadEarlierMessages:nil]; CheckUI([[delegate valueForKey:@"transcriptOffset"] unsignedIntegerValue]==0 && [[delegate valueForKey:@"transcriptRanges"] count]==200,"earlier page stays bounded");
+            [delegate loadNewerMessages:nil]; CheckUI([[delegate valueForKey:@"transcriptOffset"] unsignedIntegerValue]==200,"later page advances without loading entire transcript");
+            [linkedTranscript setSelectedRange:NSMakeRange(0,10)]; [delegate jumpToLatest:nil]; CheckUI([[delegate valueForKey:@"transcriptOffset"] unsignedIntegerValue]==250 && !daily.unreadCounts.count,"jump to latest loads tail and persists read flags");
+            NSMenuItem *favoriteItem=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(toggleFavorite:) keyEquivalent:@""]; favoriteItem.representedObject=@"777";
+            [delegate toggleFavorite:favoriteItem]; [delegate reloadContacts];
+            CheckUI([[[delegate valueForKey:@"visibleContacts"] firstObject][@"aimId"] isEqual:@"777"] && [[testAlertDefaults arrayForKey:@"FavoritePeers.12345"] containsObject:@"777"],"favorite sorts first and persists per account even while offline");
+            [delegate toggleFavoritesFilter:nil]; CheckUI([[delegate valueForKey:@"visibleContacts"] count]==1,"favorites filter shows only selected local favorite");
+            [delegate toggleOnlineFilter:nil]; CheckUI([[delegate valueForKey:@"visibleContacts"] count]==0 && [[[delegate valueForKey:@"emptyListLabel"] stringValue] rangeOfString:@"фильтрам"].location!=NSNotFound,"combined filters explain an empty result");
+            [delegate toggleFavoritesFilter:nil]; CheckUI([[delegate valueForKey:@"visibleContacts"] count]==2,"online filter includes away and excludes offline"); [delegate toggleOnlineFilter:nil];
+            [delegate setTranscriptAroundID:@"page-010"]; [delegate renderTranscript]; CheckUI([delegate valueForKey:@"transcriptRanges"][@"page-010"]!=nil,"indexed jump can reveal a message outside loaded tail");
+            [delegate toggleEmoticons:nil]; // Restore plain text first, regardless of previous visual preference.
+            if (fontPreferences.emoticonsEnabled) [delegate toggleEmoticons:nil];
+            CheckUI([linkedTranscript.string rangeOfString:@":)"].location!=NSNotFound,"disabled emoticons show original text");
+            [delegate toggleEmoticons:nil];
+            __block BOOL foundAttachment=NO;
+            [linkedTranscript.textStorage enumerateAttribute:@"JMSmileyText" inRange:NSMakeRange(0,linkedTranscript.string.length) options:0 usingBlock:^(id value,NSRange range,BOOL *stop) { if (value) foundAttachment=YES; }];
+            CheckUI(foundAttachment && fontPreferences.emoticonsEnabled,"enabled classic smileys use native inline image attachments");
+            NSArray *savedBoard=PreserveClipboard();
+            @try { [linkedTranscript setSelectedRange:NSMakeRange(0,linkedTranscript.string.length)]; [linkedTranscript copy:nil]; NSString *copied=[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString]; CheckUI([copied rangeOfString:@":)"].location!=NSNotFound && [copied rangeOfString:@"\uFFFC"].location==NSNotFound,"copying rendered smileys restores original text"); } @finally { RestoreClipboard(savedBoard); }
+            [linkedTranscript setSelectedRange:NSMakeRange(0,0)];
+            Capture(chat,[output stringByAppendingPathComponent:@"UI-daily-history.png"]);
+            [chat setContentSize:NSMakeSize(860,560)];
+            for (NSString *key in @[@"onlineOnlyCheckbox",@"favoritesOnlyCheckbox",@"olderMessagesButton",@"newerMessagesButton",@"historyPageLabel"]) { NSView *view=[delegate valueForKey:key]; CheckUI(NSContainsRect(view.superview.bounds,view.frame),"new filter and page controls fit smallest window"); }
+            [delegate selectPeer:@"666"]; Draft(delegate,composer,@"Новая отправка :)"); NSUInteger sendsBefore=client.sendCount; [delegate send:nil];
+            NSString *localID=[delegate valueForKey:@"sendingLocalID"];
+            CheckUI(client.sendCount==sendsBefore+1 && [[[daily messageWithID:localID peer:@"666"] objectForKey:@"delivery"] isEqual:@"pending"],"message is stored with sending state before network confirmation");
+            FinishSend(client,nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorTimedOut userInfo:nil]);
+            CheckUI([[[daily messageWithID:localID peer:@"666"] objectForKey:@"delivery"] isEqual:@"unknown"] && client.sendCount==sendsBefore+1,"ambiguous network failure becomes unknown and is never automatically resent");
+            NSDictionary *unknown=[daily messageWithID:localID peer:@"666"];
+            Draft(delegate,composer,@"Другой черновик"); [delegate transmitRecord:unknown clearsDraft:NO];
+            CheckUI([[[delegate draftSnapshot] objectForKey:@"666"] isEqual:@"Другой черновик"],"manual retry never prepends old outgoing text to independent persisted draft");
+            FinishSend(client,@"retry-confirmed",nil);
+            CheckUI([composer.string isEqual:@"Другой черновик"] && [daily messageWithID:localID peer:@"666"]==nil && [[[daily messageWithID:@"retry-confirmed" peer:@"666"] objectForKey:@"delivery"] isEqual:@"accepted"],"explicit retry reconciles message and keeps independently typed draft");
+            Capture(chat,[output stringByAppendingPathComponent:@"UI-daily-send-state.png"]);
+            [delegate showPreferences:nil]; NSString *previousFamily=fontPreferences.family; CGFloat previousSize=fontPreferences.size;
+            [fontPreferences setFamily:@"" size:28]; [delegate applyChatFont];
+            NSTextField *largePreview=[delegate valueForKey:@"fontPreview"]; NSButton *smileSetting=[delegate valueForKey:@"emoticonsCheckbox"];
+            CheckUI(NSHeight(largePreview.frame)>=40 && !NSIntersectsRect(largePreview.frame,smileSetting.frame),"largest font preview and smiley preference have separate readable areas");
+            Capture([delegate valueForKey:@"preferencesWindow"],[output stringByAppendingPathComponent:@"UI-daily-preferences.png"]);
+            [fontPreferences setFamily:previousFamily size:previousSize]; [delegate applyChatFont]; [delegate closePreferences:nil];
+            UIUpdateChecker *updates=[[UIUpdateChecker alloc] init]; updates.releaseInfo=@{@"version":@"0.14.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.14.0"],@"notes":@"Fixture release"};
+            [delegate setValue:updates forKey:@"updateChecker"]; delegate.allowUpdatePresentation=@NO;
+            [testAlertDefaults removeObjectForKey:@"UpdateNoticeShownVersion"]; [testAlertDefaults removeObjectForKey:@"LastSuccessfulUpdateCheck"];
+            [delegate checkUpdatesAutomatically:YES]; PumpUI(0.05);
+            CheckUI(updates.checks==1 && delegate.automaticUpdateNotices==0 && [delegate valueForKey:@"pendingUpdateRelease"]!=nil,"automatic update defers popup while login, sheet or auxiliary window has focus");
+            delegate.allowUpdatePresentation=@YES; [delegate presentPendingUpdateIfPossible]; PumpUI(0.05);
+            CheckUI(delegate.automaticUpdateNotices==1 && [delegate.presentedUpdateVersion isEqual:@"0.14.0"],"available update opens automatically when main conversation is ready");
+            [delegate presentPendingUpdateIfPossible]; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
+            CheckUI(delegate.automaticUpdateNotices==1 && updates.checks==1,"same update is shown once and network is not polled again within six hours");
+            [testAlertDefaults setObject:[NSDate dateWithTimeIntervalSinceNow:-7*3600] forKey:@"LastSuccessfulUpdateCheck"]; updates.releaseInfo=@{@"version":@"0.13.0"}; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
+            CheckUI(updates.checks==2 && delegate.automaticUpdateNotices==1,"automatic check for current version remains silent");
+            [testAlertDefaults setObject:[NSDate dateWithTimeIntervalSinceNow:-7*3600] forKey:@"LastSuccessfulUpdateCheck"]; updates.error=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorNotConnectedToInternet userInfo:nil]; updates.releaseInfo=nil;
+            NSString *previousError=delegate.lastError; [delegate automaticUpdateTick:nil]; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
+            CheckUI(updates.checks==3 && delegate.lastError==previousError && delegate.automaticUpdateNotices==1,"automatic network failure stays silent and applies retry delay");
+            [delegate toggleAutomaticUpdates:nil]; [delegate setValue:nil forKey:@"updateRetryDate"]; [delegate automaticUpdateTick:nil];
+            CheckUI(updates.checks==3 && ![testAlertDefaults boolForKey:@"AutomaticallyCheckUpdates"],"automatic update menu setting disables background checks");
+
+
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
             emptyView=[delegate valueForKey:@"conversationEmptyView"]; emptyFits=YES;
             for (NSView *view in emptyView.subviews) if (!view.hidden && !NSContainsRect(emptyView.bounds,view.frame)) emptyFits=NO;
@@ -1210,6 +1315,12 @@ int main(int argc, const char *argv[]) {
         CheckUI([addDialog.accessoryView viewWithTag:102]!=nil,"add contact dialog includes server group chooser");
         timer=[NSTimer timerWithTimeInterval:0.1 target:promptFixture selector:@selector(edit:) userInfo:nil repeats:NO]; [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSModalPanelRunLoopMode];
         CheckUI([addDialog runModal]==NSAlertSecondButtonReturn,"Escape cancels native add-contact prompt"); [addDialog.window orderOut:nil];
+        dispatch_semaphore_t exportGate=dispatch_semaphore_create(0); __block BOOL exportFinished=NO;
+        dispatch_async((dispatch_queue_t)[delegate valueForKey:@"historySearchQueue"],^{ dispatch_semaphore_wait(exportGate,DISPATCH_TIME_FOREVER); exportFinished=YES; });
+        CheckUI([delegate applicationShouldTerminate:app]==NSTerminateLater,"Cmd+Q waits asynchronously for queued export work"); PumpUI(0.1);
+        CheckUI(delegate.terminationReplies==0,"application does not exit while an export is still writing");
+        dispatch_semaphore_signal(exportGate); LoginQueue(delegate); PumpUI(0.2);
+        CheckUI(exportFinished && delegate.terminationReplies==1,"application completes termination after export and credentials finish");
         [[NSFileManager defaultManager] removeItemAtURL:root error:NULL];
         [fontDefaults removePersistentDomainForName:suite]; [fontDefaults synchronize];
         [chat orderOut:nil];

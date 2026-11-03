@@ -12,6 +12,7 @@
     self=[super init]; if (!self) return nil;
     self.defaults=defaults ?: [NSUserDefaults standardUserDefaults];
     _sendWithCommandReturn=[self.defaults boolForKey:@"ChatSendWithCommandReturn"];
+    _emoticonsEnabled=[self.defaults objectForKey:@"ChatEmoticonsEnabled"] ? [self.defaults boolForKey:@"ChatEmoticonsEnabled"] : YES;
     [self applyFamily:[self.defaults objectForKey:@"ChatFontFamily"] size:[self.defaults doubleForKey:@"ChatFontSize"]];
     return self;
 }
@@ -30,5 +31,6 @@
     [self.defaults setObject:self.family forKey:@"ChatFontFamily"]; [self.defaults setDouble:self.size forKey:@"ChatFontSize"];
 }
 - (void)reset { [self setFamily:@"" size:13]; }
+- (void)setEmoticonsEnabled:(BOOL)value { _emoticonsEnabled=value; [self.defaults setBool:value forKey:@"ChatEmoticonsEnabled"]; }
 - (void)setSendWithCommandReturn:(BOOL)value { _sendWithCommandReturn=value; [self.defaults setBool:value forKey:@"ChatSendWithCommandReturn"]; }
 @end

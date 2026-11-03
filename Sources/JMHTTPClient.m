@@ -1,4 +1,5 @@
 #import "JMHTTPClient.h"
+#import "JMGitHubTrust.h"
 
 @interface JMHTTPClient () <NSURLSessionDataDelegate, NSURLSessionTaskDelegate>
 @property(nonatomic, strong) NSURLSession *session;
@@ -79,7 +80,10 @@ static NSError *JMHTTPError(NSInteger code) { return [NSError errorWithDomain:NS
 - (NSCachedURLResponse *)connection:(NSURLConnection *)connection willCacheResponse:(NSCachedURLResponse *)cachedResponse { return nil; }
 - (BOOL)connectionShouldUseCredentialStorage:(NSURLConnection *)connection { return NO; }
 - (void)connection:(NSURLConnection *)connection willSendRequestForAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge {
-    if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) [challenge.sender performDefaultHandlingForAuthenticationChallenge:challenge];
+    if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust] && self.owner.githubUpdateTrust) {
+        if (JMEvaluateGitHubTrust(challenge.protectionSpace.serverTrust,challenge.protectionSpace.host,JMGitHubAnchorCertificates())) [challenge.sender useCredential:[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust] forAuthenticationChallenge:challenge];
+        else [challenge.sender cancelAuthenticationChallenge:challenge];
+    } else if ([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) [challenge.sender performDefaultHandlingForAuthenticationChallenge:challenge];
     else [challenge.sender cancelAuthenticationChallenge:challenge];
 }
 @end
@@ -128,6 +132,10 @@ static NSError *JMHTTPError(NSInteger code) { return [NSError errorWithDomain:NS
     else { [wrapper finish:JMHTTPError(NSURLErrorHTTPTooManyRedirects)]; completionHandler(nil); }
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didReceiveChallenge:(NSURLAuthenticationChallenge *)challenge completionHandler:(void (^)(NSURLSessionAuthChallengeDisposition,NSURLCredential *))completionHandler {
+    if (self.githubUpdateTrust && [challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust]) {
+        BOOL trusted=JMEvaluateGitHubTrust(challenge.protectionSpace.serverTrust,challenge.protectionSpace.host,JMGitHubAnchorCertificates());
+        completionHandler(trusted ? NSURLSessionAuthChallengeUseCredential : NSURLSessionAuthChallengeCancelAuthenticationChallenge,trusted ? [NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust] : nil); return;
+    }
     completionHandler([challenge.protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust] ? NSURLSessionAuthChallengePerformDefaultHandling : NSURLSessionAuthChallengeCancelAuthenticationChallenge,nil);
 }
 @end

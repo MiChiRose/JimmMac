@@ -3,8 +3,16 @@
 #import "JMProtocol.h"
 #import "JMKeyboard.h"
 #import "JMHTTPClient.h"
+#import "JMUpdateChecker.h"
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
+        if (argc>1 && strcmp(argv[1],"--probe-updates")==0) {
+            __block BOOL done=NO; __block int result=1;
+            JMUpdateChecker *checker=[[JMUpdateChecker alloc] initWithProtocolClasses:nil legacy:argc>2 && strcmp(argv[2],"--legacy")==0];
+            [checker check:^(NSDictionary *release,NSError *error) { if (release && !error) { printf("GitHub update check OK: stable version %s\n",[release[@"version"] UTF8String]); result=0; } else fprintf(stderr,"Update check failed: %s\n",[error.localizedDescription UTF8String]); done=YES; }];
+            NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:30]; while (!done && deadline.timeIntervalSinceNow>0) [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+            return result;
+        }
         BOOL profileProbe=argc>1 && strcmp(argv[1],"--probe-profile")==0;
         if (argc > 1 && (strcmp(argv[1], "--probe-network") == 0 || profileProbe)) {
             // Check the actual routes/methods without a real token or session.

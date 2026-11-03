@@ -9,6 +9,7 @@
 @property(nonatomic, copy) NSString *token;
 @property(nonatomic, strong) NSDate *tokenExpiration;
 @property(nonatomic) BOOL deliverLoginToken;
+@property(nonatomic) BOOL usingSavedToken;
 @property(nonatomic, copy) NSString *sessionID;
 @property(nonatomic, copy, readwrite) NSString *uin;
 @property(nonatomic, readwrite) BOOL connected;
@@ -44,7 +45,7 @@
     // UIN, token, session ID, messages or NSError's userInfo.
     [self.diagnosticEntries addObject:@{@"endpoint":path, @"http":@(http), @"api":@(api),
         @"errorDomain":error.domain ?: @"", @"errorCode":@(error.code),
-        @"version":@"0.12.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
+        @"version":@"0.13.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
     if ([self.diagnosticEntries count] > 20) [self.diagnosticEntries removeObjectAtIndex:0];
     NSURL *root = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
     NSURL *directory = [root URLByAppendingPathComponent:@"JimmMac" isDirectory:YES];
@@ -74,7 +75,8 @@
 - (void)prepareLoginWithUIN:(NSString *)uin {
     [self disconnect];
     self.uin = uin;
-    self.diagnosticEntries = [NSMutableArray array];
+    if (!self.diagnosticEntries) self.diagnosticEntries = [NSMutableArray array];
+    self.usingSavedToken=NO;
     self.typingLastSent = [NSMutableDictionary dictionary]; self.typingPending = [NSMutableDictionary dictionary]; self.typingScheduled = [NSMutableSet set];
     self.preferredPresence=nil;
     self.sequence = 0; self.failures = 0;
@@ -98,7 +100,7 @@
 - (void)resumeWithUIN:(NSString *)uin token:(NSString *)token {
     [self prepareLoginWithUIN:uin];
     if (!JMValidUIN(uin) || ![token isKindOfClass:[NSString class]] || !token.length || token.length>16384) { [self loginFailed:nil]; return; }
-    self.token=token; [self verifySavedToken];
+    self.token=token; self.usingSavedToken=YES; [self verifySavedToken];
 }
 - (void)verifySavedToken {
     [self status:@"Восстанавливаем сохранённый вход…" connected:NO];
@@ -115,6 +117,7 @@
 }
 - (void)loginFailed:(NSError *)error {
     if (!error) error = [NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Сервер не вернул данные для входа."}];
+    if (self.usingSavedToken && [error.domain isEqual:JMAPIErrorDomain] && (error.code==330 || error.code==401)) error=[NSError errorWithDomain:error.domain code:error.code userInfo:@{NSLocalizedDescriptionKey:@"Сервер отклонил сохранённый вход. Введите UIN и пароль заново; после входа можно снова включить «Запомнить меня»."}];
     [self disconnect];
     [self.delegate client:self failedLogin:error];
 }
@@ -122,7 +125,7 @@
     NSUInteger attempt = ++self.sessionSerial;
     [self status:@"Подключаемся к Jimm.online…" connected:NO];
     [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,sessionEnded,rateLimit",
-                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.12.0", @"timeout":@"60"}
+                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.13.0", @"timeout":@"60"}
            timeout:30 completion:^(NSDictionary *data, NSError *error) {
         if (attempt != self.sessionSerial) return;
         if (error) {

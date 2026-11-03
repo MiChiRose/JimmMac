@@ -1,12 +1,15 @@
 #import <Foundation/Foundation.h>
 #import "JMProtocol.h"
 #import "JMHistory.h"
+#import "JMUpdateChecker.h"
+#import "JMGitHubTrust.h"
 #import "JMAPIClient.h"
 #import "JMHTTPClient.h"
 #import "JMTextTools.h"
 #import "JMDraftStore.h"
 #import "JMLoginStore.h"
 #import <sys/stat.h>
+#import <sqlite3.h>
 
 static NSUInteger checks = 0;
 static void Check(BOOL condition, NSString *name) {
@@ -30,6 +33,7 @@ static NSMutableDictionary *directoryNames;
 static BOOL wrongDirectory;
 static BOOL wrongSavedIdentity;
 static BOOL rejectSavedToken;
+static NSInteger savedTokenRejectCode=401;
 static BOOL failSavedReadOnce;
 static NSString *Field(NSString *query, NSString *key) {
     for (NSString *part in [query componentsSeparatedByString:@"&"]) {
@@ -49,6 +53,21 @@ static BOOL failOwnRead;
 @class FixtureProtocol;
 static FixtureProtocol *heldPoll;
 static NSUInteger CountRequests(NSString *suffix) { NSUInteger count=0; for (NSURLRequest *r in requests) if ([r.URL.path hasSuffix:suffix]) count++; return count; }
+static NSInteger updateFixtureStatus=200;
+static NSURLRequest *updateFixtureRequest;
+@interface UpdateFixture : NSURLProtocol
+@end
+@implementation UpdateFixture
++ (BOOL)canInitWithRequest:(NSURLRequest *)request { return [request.URL.host isEqual:@"api.github.com"]; }
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
+- (void)startLoading {
+    updateFixtureRequest=self.request;
+    NSData *data=JSON(@{@"tag_name":@"v0.14.0",@"html_url":@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.14.0",@"draft":@NO,@"prerelease":@NO,@"body":@"Fixture notes"});
+    NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:updateFixtureStatus HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type":@"application/json"}];
+    [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed]; [self.client URLProtocol:self didLoadData:data]; [self.client URLProtocolDidFinishLoading:self];
+}
+- (void)stopLoading {}
+@end
 @interface FixtureProtocol : NSURLProtocol
 - (void)respondWithData:(NSDictionary *)data status:(NSInteger)status;
 @end
@@ -78,7 +97,7 @@ static NSUInteger CountRequests(NSString *suffix) { NSUInteger count=0; for (NSU
     if ([path hasSuffix:@"/clientLogin"]) { if (rejectLogin) status = 330; else data = @{@"loginId":@"111",@"token":@{@"a":@"fixture-token",@"expiresIn":[Field(forms.lastObject,@"tokenType") isEqualToString:@"longterm"] ? @31536000 : @86400}}; }
     if ([path hasSuffix:@"/auth/getInfo"]) {
         if (![self.request.HTTPMethod isEqualToString:@"GET"]) status=404;
-        else if (rejectSavedToken) status=401;
+        else if (rejectSavedToken) status=savedTokenRejectCode;
         else if (failSavedReadOnce) { failSavedReadOnce=NO; status=503; }
         else data=@{@"userData":@{@"loginId":wrongSavedIdentity ? @"222" : @"111"}};
     }
@@ -153,6 +172,7 @@ static NSUInteger CountRequests(NSString *suffix) { NSUInteger count=0; for (NSU
 @property(nonatomic, strong) NSDictionary *ownInfo;
 @property NSUInteger typingCount;
 @property(nonatomic, copy) NSString *lastStatus;
+@property(nonatomic,strong) NSError *lastLoginError;
 @property NSUInteger authenticatedTokens;
 @property BOOL longTermExpiration;
 @end
@@ -161,7 +181,7 @@ static NSUInteger CountRequests(NSString *suffix) { NSUInteger count=0; for (NSU
 - (void)client:(JMAPIClient *)client receivedBuddyList:(NSDictionary *)list { self.buddyCount = [JMContactsFromBuddyList(list) count]; }
 - (void)client:(JMAPIClient *)client receivedPresence:(NSDictionary *)presence { self.presenceCount++; }
 - (BOOL)client:(JMAPIClient *)client receivedMessage:(NSDictionary *)message { self.messageCount++; return !self.refuseMessages; }
-- (void)client:(JMAPIClient *)client failedLogin:(NSError *)error { self.loginErrors++; }
+- (void)client:(JMAPIClient *)client failedLogin:(NSError *)error { self.loginErrors++; self.lastLoginError=error; }
 - (void)client:(JMAPIClient *)client receivedOwnInfo:(NSDictionary *)info { self.ownInfo=info; }
 - (void)client:(JMAPIClient *)client receivedTyping:(NSDictionary *)typing { self.typingCount++; }
 - (void)client:(JMAPIClient *)client authenticatedWithToken:(NSString *)token expiresAt:(NSDate *)expiration { self.authenticatedTokens++; self.longTermExpiration=expiration.timeIntervalSinceNow>300*86400; }
@@ -266,12 +286,94 @@ int main(void) {
         Check([[history messagesForPeer:@"222"] count] == 2, @"history survives restart");
         JMHistory *other = [[JMHistory alloc] initWithUIN:@"333" root:root];
         Check([[other peers] count] == 0, @"account isolation");
-        NSURL *file = [root URLByAppendingPathComponent:@"JimmMac/accounts/111/history.json"];
+        NSURL *file = [root URLByAppendingPathComponent:@"JimmMac/accounts/111/history.sqlite"];
         struct stat st; stat([[file path] fileSystemRepresentation], &st);
-        Check((st.st_mode & 0777) == 0600, @"history file permissions");
-        [@"broken" writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-        history = [[JMHistory alloc] initWithUIN:@"111" root:root];
-        Check(history.loadError != nil && ![history appendMessage:sent error:NULL], @"corrupt history never overwritten");
+        Check((st.st_mode & 0777) == 0600, @"history database permissions");
+        NSURL *brokenLegacy=[root URLByAppendingPathComponent:@"JimmMac/accounts/333/history.json"];
+        other=nil;
+        [[NSFileManager defaultManager] removeItemAtURL:[root URLByAppendingPathComponent:@"JimmMac/accounts/333"] error:NULL];
+        [[NSFileManager defaultManager] createDirectoryAtURL:[brokenLegacy URLByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:NULL];
+        [@"broken" writeToURL:brokenLegacy atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+        other = [[JMHistory alloc] initWithUIN:@"333" root:root];
+        Check(other.loadError != nil && ![other appendMessage:sent error:NULL] && [[NSString stringWithContentsOfURL:brokenLegacy encoding:NSUTF8StringEncoding error:NULL] isEqual:@"broken"], @"corrupt legacy history never overwritten");
+        NSURL *legacy=[root URLByAppendingPathComponent:@"JimmMac/accounts/444/history.json"];
+        [[NSFileManager defaultManager] createDirectoryAtURL:[legacy URLByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:NULL];
+        NSMutableDictionary *legacyIncoming=[incoming mutableCopy]; legacyIncoming[@"text"]=@"Привет из старой истории";
+        NSData *legacyData=[NSJSONSerialization dataWithJSONObject:@{@"222":@[legacyIncoming,sent]} options:0 error:NULL]; [legacyData writeToURL:legacy atomically:YES];
+        JMHistory *migrated=[[JMHistory alloc] initWithUIN:@"444" root:root];
+        Check(!migrated.loadError && [migrated countForPeer:@"222"]==2,@"legacy JSON migrates to indexed SQLite without losing messages");
+        Check([[NSData dataWithContentsOfURL:legacy] isEqual:legacyData],@"migration retains original JSON byte for byte as backup");
+        Check([migrated searchQuery:@"ПРИВЕТ" peer:@"222" limit:200].count>0,@"SQLite search preserves Unicode case-insensitive matching");
+        NSDictionary *unreadMessage=@{@"peer":@"222",@"id":@"durable-unread",@"text":@"Непрочитанное <script>alert('x')</script> & :)\nСледующая строка",@"timestamp":@9999999999,@"outgoing":@NO};
+        Check([migrated appendMessage:unreadMessage unread:YES error:NULL] && [migrated appendMessage:unreadMessage unread:YES error:NULL] && [migrated.unreadCounts[@"222"] integerValue]==1,@"unread and incoming message persist in one insert and duplicates do not increment count");
+        migrated=nil; migrated=[[JMHistory alloc] initWithUIN:@"444" root:root];
+        Check([migrated.unreadCounts[@"222"] integerValue]==1 && [[migrated firstUnreadIDForPeer:@"222"] isEqual:@"durable-unread"],@"unread count and first-unread location survive reopening");
+        Check([migrated markReadPeer:@"222" error:NULL],@"reading selected peer commits read flags");
+        migrated=nil; migrated=[[JMHistory alloc] initWithUIN:@"444" root:root]; Check(migrated.unreadCounts.count==0,@"read flags survive reopening");
+        NSDictionary *pending=@{@"peer":@"222",@"id":@"local-pending",@"text":@"Outgoing fixture",@"timestamp":@9999999998,@"outgoing":@YES,@"delivery":@"pending"};
+        Check([migrated appendMessage:pending error:NULL],@"outgoing attempt is durable before request starts");
+        migrated=nil; migrated=[[JMHistory alloc] initWithUIN:@"444" root:root];
+        Check([[[migrated messageWithID:@"local-pending" peer:@"222"] objectForKey:@"delivery"] isEqual:@"unknown"],@"interrupted pending send becomes unknown on restart, without automatic retry");
+        NSMutableDictionary *echo=[pending mutableCopy]; echo[@"id"]=@"server-id"; [echo removeObjectForKey:@"delivery"];
+        [migrated appendMessage:echo error:NULL]; NSUInteger beforeConfirm=[migrated countForPeer:@"222"];
+        Check([migrated confirmLocalID:@"local-pending" peer:@"222" message:echo error:NULL] && [migrated countForPeer:@"222"]==beforeConfirm-1 && [[[migrated messageWithID:@"server-id" peer:@"222"] objectForKey:@"delivery"] isEqual:@"accepted"],@"confirmation reconciles already received echo without duplicate outgoing row");
+        Check([migrated messagesForPeer:@"222" offset:1 limit:2].count==2 && [migrated indexOfMessage:@"durable-unread" peer:@"222"]==[migrated countForPeer:@"222"]-1,@"bounded pages and indexed jump keep full ordered history");
+        NSURL *html=[root URLByAppendingPathComponent:@"export.html"], *txt=[root URLByAppendingPathComponent:@"export.txt"];
+        Check([migrated exportPeer:@"222" name:@"<Friend>" account:@"444" html:YES toURL:html error:NULL] && [migrated exportPeer:@"222" name:@"<Friend>" account:@"444" html:NO toURL:txt error:NULL],@"both export formats write full conversation");
+        NSString *htmlText=[NSString stringWithContentsOfURL:html encoding:NSUTF8StringEncoding error:NULL],*plainText=[NSString stringWithContentsOfURL:txt encoding:NSUTF8StringEncoding error:NULL];
+        Check([htmlText rangeOfString:@"<script>"].location==NSNotFound && [htmlText rangeOfString:@"&lt;script&gt;"].location!=NSNotFound && [htmlText rangeOfString:@"&lt;Friend&gt;"].location!=NSNotFound,@"HTML escapes message and participant content rather than executing it");
+        Check([plainText rangeOfString:unreadMessage[@"text"]].location!=NSNotFound && [plainText rangeOfString:@"444"].location!=NSNotFound,@"TXT preserves original text, line breaks and emoticons");
+        stat(txt.path.fileSystemRepresentation,&st); Check((st.st_mode&0777)==0600,@"export has owner-only permissions");
+        Check(![migrated exportPeer:@"222" name:@"Friend" account:@"444" html:NO toURL:[root URLByAppendingPathComponent:@"missing/failed.txt"] error:NULL],@"export failure does not claim success");
+        JMHistory *large=[[JMHistory alloc] initWithUIN:@"555" root:root]; NSTimeInterval began=[NSDate timeIntervalSinceReferenceDate];
+        for (NSUInteger i=0;i<10000;i++) { @autoreleasepool { if (![large appendMessage:@{@"peer":@"222",@"id":[NSString stringWithFormat:@"bulk-%05lu",(unsigned long)i],@"text":@"Большая история: строка для поиска",@"timestamp":@(i),@"outgoing":@NO} error:NULL]) { fprintf(stderr,"Bulk insert failed\n"); exit(1); } } }
+        NSTimeInterval inserted=[NSDate timeIntervalSinceReferenceDate]-began; began=[NSDate timeIntervalSinceReferenceDate];
+        Check([large countForPeer:@"222"]==10000 && [large messagesForPeer:@"222" offset:9800 limit:200].count==200 && [large searchQuery:@"ИСТОРИЯ" peer:@"222" limit:201].count==201,@"10,000-message history supports bounded pages and bounded Unicode search results");
+        printf("History benchmark: 10000 inserts %.3fs, page + search %.3fs\n",inserted,[NSDate timeIntervalSinceReferenceDate]-began);
+        NSString *testDirectory=[[NSString stringWithUTF8String:__FILE__] stringByDeletingLastPathComponent];
+        NSMutableArray *certificateChain=[NSMutableArray array];
+        for (NSString *file in @[@"Fixtures/github-api-leaf.der",@"Fixtures/github-api-intermediate.der"]) {
+            NSData *der=[NSData dataWithContentsOfFile:[testDirectory stringByAppendingPathComponent:file]];
+            SecCertificateRef cert=der ? SecCertificateCreateWithData(NULL,(__bridge CFDataRef)der) : NULL;
+            Check(cert!=NULL,@"public TLS chain fixture decodes"); [certificateChain addObject:CFBridgingRelease(cert)];
+        }
+        NSData *anchorData=[NSData dataWithContentsOfFile:[testDirectory stringByAppendingPathComponent:@"../Resources/SectigoPublicServerAuthenticationRootE46.der"]];
+        SecCertificateRef anchor=SecCertificateCreateWithData(NULL,(__bridge CFDataRef)anchorData); Check(anchor!=NULL,@"official Sectigo root decodes"); NSArray *anchors=@[CFBridgingRelease(anchor)];
+        SecPolicyRef tlsPolicy=SecPolicyCreateSSL(true,CFSTR("api.github.com")); SecTrustRef trust=NULL;
+        SecTrustCreateWithCertificates((__bridge CFArrayRef)certificateChain,tlsPolicy,&trust);
+        SecTrustSetVerifyDate(trust,(__bridge CFDateRef)[NSDate dateWithTimeIntervalSince1970:1793707200]);
+        Check(JMEvaluateGitHubTrust(trust,@"api.github.com",anchors),@"scoped additional root validates genuine GitHub chain and hostname on legacy Security");
+        Check(!JMEvaluateGitHubTrust(trust,@"evil.invalid",anchors),@"additional root is never used for another host");
+        SecTrustSetVerifyDate(trust,(__bridge CFDateRef)[NSDate dateWithTimeIntervalSince1970:2208988800]);
+        Check(!JMEvaluateGitHubTrust(trust,@"api.github.com",anchors),@"expired leaf remains rejected even with additional root"); CFRelease(trust);
+        SecTrustCreateWithCertificates((__bridge CFArrayRef)anchors,tlsPolicy,&trust);
+        Check(!JMEvaluateGitHubTrust(trust,@"api.github.com",anchors),@"trusted root by itself cannot impersonate api.github.com"); CFRelease(trust); CFRelease(tlsPolicy);
+        Check([JMUpdateChecker compareVersion:@"0.13.0" to:@"0.12.9"]==NSOrderedDescending && [JMUpdateChecker compareVersion:@"0.9" to:@"0.12"]==NSOrderedAscending && [JMUpdateChecker compareVersion:@"1.2" to:@"1.2.0"]==NSOrderedSame,@"update versions compare numerically, not lexicographically");
+        NSDictionary *release=@{@"tag_name":@"v0.13.0",@"html_url":@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.13.0",@"draft":@NO,@"prerelease":@NO,@"body":@"Fixture release"};
+        Check([[JMUpdateChecker releaseFromData:[NSJSONSerialization dataWithJSONObject:release options:0 error:NULL] error:NULL][@"version"] isEqual:@"0.13.0"],@"valid stable release is parsed");
+        NSMutableDictionary *bad=[release mutableCopy]; bad[@"html_url"]=@"https://evil.invalid/update";
+        Check([JMUpdateChecker releaseFromData:[NSJSONSerialization dataWithJSONObject:bad options:0 error:NULL] error:NULL]==nil,@"update response cannot redirect users to unrelated download site");
+        bad=[release mutableCopy]; bad[@"prerelease"]=@YES;
+        Check([JMUpdateChecker releaseFromData:[NSJSONSerialization dataWithJSONObject:bad options:0 error:NULL] error:NULL]==nil && [JMUpdateChecker releaseFromData:[@"broken" dataUsingEncoding:NSUTF8StringEncoding] error:NULL]==nil,@"prerelease and malformed release data are rejected");
+        bad=[release mutableCopy]; bad[@"draft"]=@{};
+        Check([JMUpdateChecker releaseFromData:JSON(bad) error:NULL]==nil,@"malformed boolean fields cannot crash update parsing");
+        [NSURLProtocol registerClass:[UpdateFixture class]];
+        JMUpdateChecker *updateChecker=[[JMUpdateChecker alloc] initWithProtocolClasses:@[[UpdateFixture class]] legacy:getenv("JIMMMAC_TEST_LEGACY_TRANSPORT")!=NULL];
+        __block NSDictionary *checkedRelease=nil; __block NSError *updateError=nil;
+        [updateChecker check:^(NSDictionary *r,NSError *e) { checkedRelease=r; updateError=e; }]; Pump(0.3);
+        Check([checkedRelease[@"version"] isEqual:@"0.14.0"] && !updateError,@"update checker reads public release through selected HTTP transport");
+        Check([updateFixtureRequest.HTTPMethod isEqual:@"GET"] && !updateFixtureRequest.URL.query.length && ![updateFixtureRequest valueForHTTPHeaderField:@"Authorization"] && !updateFixtureRequest.HTTPBody.length && !updateFixtureRequest.HTTPShouldHandleCookies,@"update request sends no account credentials, query or cookies");
+        updateFixtureStatus=503; checkedRelease=nil;
+        [updateChecker check:^(NSDictionary *r,NSError *e) { checkedRelease=r; updateError=e; }]; Pump(0.3);
+        Check(!checkedRelease && updateError,@"GitHub HTTP failure is not reported as up-to-date");
+        [NSURLProtocol unregisterClass:[UpdateFixture class]];
+        NSDictionary *rollbackPending=@{@"peer":@"222",@"id":@"rollback-local",@"text":@"Retain on disk error",@"timestamp":@9999999999,@"outgoing":@YES,@"delivery":@"pending"};
+        [migrated appendMessage:rollbackPending error:NULL];
+        sqlite3 *faultDB=NULL; sqlite3_open([[root URLByAppendingPathComponent:@"JimmMac/accounts/444/history.sqlite"] path].fileSystemRepresentation,&faultDB);
+        sqlite3_exec(faultDB,"CREATE TRIGGER fail_confirm BEFORE INSERT ON messages WHEN NEW.id='fail-confirm' BEGIN SELECT RAISE(ABORT,'fixture write failure'); END",NULL,NULL,NULL);
+        NSMutableDictionary *failedConfirmation=[rollbackPending mutableCopy]; failedConfirmation[@"id"]=@"fail-confirm";
+        Check(![migrated confirmLocalID:@"rollback-local" peer:@"222" message:failedConfirmation error:NULL] && [migrated messageWithID:@"rollback-local" peer:@"222"]!=nil,@"failed confirmation transaction keeps durable original outgoing text");
+        sqlite3_exec(faultDB,"DROP TRIGGER fail_confirm",NULL,NULL,NULL); sqlite3_close(faultDB);
         [[NSFileManager defaultManager] removeItemAtURL:root error:NULL];
         requests = [NSMutableArray array]; forms = [NSMutableArray array]; bodies=[NSMutableArray array]; directoryNames=[@{@"firstName":@"Иван",@"lastName":@"Тест"} mutableCopy]; [NSURLProtocol registerClass:[FixtureProtocol class]];
         pollReply = @{@"events":@[offline, @{@"type":@"presence", @"seqNum":@8, @"eventData":@{@"aimId":@"222", @"state":@""}},
@@ -435,6 +537,10 @@ int main(void) {
         rejectSavedToken=YES; errorsBefore=delegate.loginErrors;
         [client resumeWithUIN:@"111" token:@"fixture-token"]; Pump(0.4);
         Check(!client.connected && delegate.loginErrors==errorsBefore+1,@"revoked saved token returns to password login"); rejectSavedToken=NO;
+        rejectSavedToken=YES; savedTokenRejectCode=330;
+        [client resumeWithUIN:@"111" token:@"fixture-token"]; Pump(0.4);
+        Check(delegate.lastLoginError.code==330 && [delegate.lastLoginError.localizedDescription rangeOfString:@"сохранённый вход"].location!=NSNotFound && [delegate.lastLoginError.localizedDescription rangeOfString:@"Неверный UIN или пароль"].location==NSNotFound,@"rejected saved token explains reauthentication without falsely claiming password was wrong");
+        rejectSavedToken=NO; savedTokenRejectCode=401;
         failSavedReadOnce=YES; identityReads=CountRequests(@"/auth/getInfo");
         [client resumeWithUIN:@"111" token:@"fixture-token"]; Pump(2.7);
         Check(client.connected && CountRequests(@"/auth/getInfo")==identityReads+2,@"temporary server failure retries saved-token verification without discarding it");

@@ -75,6 +75,40 @@ after restarting the application.
 
 </details>
 
+## New in 0.13.0
+
+The `main` branch contains the new 0.13.0 testing version. The latest published
+release in the download section above is still 0.12.0.
+
+- **Persistent unread messages.** Counts survive restarting. Opening a conversation
+  reveals its first unread message; “К последним ↓” returns to the end and marks
+  the conversation read when it is visible.
+- **Larger histories.** SQLite stores individual messages, with at most 200 rendered
+  at once. “Ранее” and “Позже” navigate pages. Search covers the full history and
+  opens matches outside the current page. Legacy JSON migrates automatically and
+  the original file remains as a backup.
+- **Sending states.** Messages show Sending, Accepted by server, Failed or
+  Confirmation not received. An uncertain message may have arrived. Right-click
+  and choose “Повторить отправку…” to retry manually after confirmation, keeping
+  the current draft. Server acceptance does not imply recipient delivery or reading.
+- **Update checks.** “JimmMac → Проверить обновления…” checks GitHub's public API.
+  Automatic checks run at launch and every six hours by default. A new version's
+  dialog appears once when the main window is ready, without interrupting sign-in
+  or other dialogs. Automatic checks can be disabled in the JimmMac menu.
+  Installation remains manual; no account credentials are sent.
+- **Favorites, filters and smileys.** Right-click a contact to add it to favorites.
+  Starred contacts sort first. Online-only and favorites-only filters apply to the
+  current list and are saved per account. Classic `:)`, `:(` and `;)` faces can be
+  disabled in Conversation settings or the View menu. Sending, copying and export
+  preserve the original text.
+- **Conversation export.** Choose a peer, then File → Export conversation in TXT or
+  HTML. The export includes the full conversation, authors, dates and unconfirmed
+  sending states. HTML works offline and escapes message content.
+
+<p align="center">
+  <img src="../screenshots/UI-daily-send-state.png" alt="New filters, classic smileys and sending state on Mavericks — fictional data" width="860" />
+</p>
+
 ## New in 0.12.0
 
 This release improves keyboard navigation, Escape and Enter behavior, undo/redo
@@ -115,8 +149,8 @@ JimmMac does not save your password. Optional saved sign-in uses an expiring tok
 in the system Keychain. **Cmd+Q** keeps that login; **«Выйти из аккаунта»** removes it.
 
 Message history and drafts are stored locally under
-`~/Library/Application Support/JimmMac/`, separately for each account. These JSON
-files are **not encrypted**. Search runs against local history. Notification
+`~/Library/Application Support/JimmMac/`, separately for each account. The SQLite history and JSON drafts
+are **not encrypted**. Search runs against local history. Notification
 previews can be adjusted in Settings.
 
 [Detailed behavior and storage notes, in Russian](GUIDE.ru.md#данные-и-сетевое-поведение).

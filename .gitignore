@@ -9,6 +9,7 @@ build-verify/
 # Runtime account data and temporary keychains
 accounts/
 history.json
+history.sqlite*
 drafts.json
 network-diagnostics.json
 *.keychain
