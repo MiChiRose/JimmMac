@@ -3,7 +3,7 @@
   <h1>JimmMac</h1>
   <p><b>A familiar flower. An older Mac. A new conversation.</b></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.12.0-5a9638" alt="Version 0.12.0" />
+    <img src="https://img.shields.io/badge/version-0.14.2-5a9638" alt="Version 0.14.2" />
     <img src="https://img.shields.io/badge/status-public%20testing-d59b35" alt="Public testing" />
     <img src="https://img.shields.io/badge/OS%20X-10.8%E2%80%9310.13-silver" alt="Target: OS X 10.8 through macOS 10.13" />
     <img src="https://img.shields.io/badge/architecture-Intel%20x86__64-687b8c" alt="Intel x86_64" />
@@ -35,9 +35,9 @@ High Sierra**. It is an independent project, not an official ICQ application.
 
 | Download | What to choose |
 | --- | --- |
-| [0.12.0 DMG installer](https://github.com/MiChiRose/JimmMac/releases/download/v0.12.0/JimmMac-0.12.0-macos10.8-10.13-x86_64.dmg) | Open the image and drag JimmMac into Applications. |
-| [0.12.0 application ZIP](https://github.com/MiChiRose/JimmMac/releases/download/v0.12.0/JimmMac-0.12.0-macos10.8-10.13-x86_64.zip) | The same application in a ZIP archive. |
-| [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.12.0) | Read about this version and verify your download. |
+| [0.14.2 DMG installer](https://github.com/MiChiRose/JimmMac/releases/download/v0.14.2/JimmMac-0.14.2-macos10.8-10.13-x86_64.dmg) | Open the image and drag JimmMac into Applications. |
+| [0.14.2 application ZIP](https://github.com/MiChiRose/JimmMac/releases/download/v0.14.2/JimmMac-0.14.2-macos10.8-10.13-x86_64.zip) | The same application in a ZIP archive. |
+| [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.14.2) | Read about this version and verify your download. |
 
 Launch JimmMac from **Applications in Finder**. When updating, quit JimmMac before
 replacing it; keep your existing application data and settings. The application
@@ -77,8 +77,8 @@ after restarting the application.
 
 ## New in 0.14
 
-The `main` branch contains testing version **0.14.2**. The latest published
-release in the downloads section is **0.12.0**; the features below apply to 0.14 source.
+The current published release is **0.14.2**. All features below are included
+in the downloadable DMG and ZIP; the matching source is tagged `v0.14.2`.
 
 - **Three appearances.** View → Appearance: Current, Nostalgia · ICQ for Mac 2011,
   and Nostalgia · ICQ Pro 2003b. Historical modes use a separate compact contact
@@ -121,7 +121,7 @@ those systems are currently unavailable. One build retains the 10.8 deployment t
 
 ## New in 0.13.0
 
-The 0.13.0 features are included in the current source version.
+The 0.13.0 features are included in the current 0.14.2 release.
 
 - **Persistent unread messages.** Counts survive restarting. Opening a conversation
   reveals its first unread message; “К последним ↓” returns to the end and marks
@@ -174,7 +174,7 @@ the full target range.
 | OS X 10.9 Mavericks | Tested on **10.9.5**, including installation, saved login, sending and automatic message reception. |
 | OS X 10.10–macOS 10.13 | Within the target range; tests on these systems are still needed. |
 
-Version 0.12.0 is a **public testing build**. It passed 566 automated checks on
+Version 0.14.2 is a **public testing build**. It passed 835 automated checks on
 Mavericks, covering both network paths, storage and the interface. The final
 application was built with Xcode 5.1.1 / SDK 10.9, with a minimum system of 10.8.
 Build compatibility does not replace testing on each actual system; differences
