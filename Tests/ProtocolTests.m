@@ -49,6 +49,8 @@ static NSString *Field(NSString *query, NSString *key) {
     return nil;
 }
 static BOOL failSend;
+static BOOL fixtureBlocked;
+static NSString *fixturePrivacyMode=@"permitAll";
 static NSDictionary *pollReply;
 static BOOL expireNextPoll;
 static BOOL rejectLogin;
@@ -108,6 +110,21 @@ static NSURLRequest *updateFixtureRequest;
         else data=@{@"userData":@{@"loginId":wrongSavedIdentity ? @"222" : @"111"}};
     }
     if ([path hasSuffix:@"/startSession"]) data = @{@"aimsid":@"fixture-session", @"events":@{@"buddylist":@{@"groups":@[@{@"name":@"Friends", @"buddies":@[@{@"aimId":@"222", @"friendly":@"Test"}]}]}}};
+    if ([path hasSuffix:@"/fetchStoredIMs"]) {
+        if (![self.request.HTTPMethod isEqual:@"GET"] || ![Field(forms.lastObject,@"to") isEqual:@"222"] || ![Field(forms.lastObject,@"nToGet") isEqual:@"200"]) status=400;
+        else data=@{@"msgs":@[@{@"sender":@"222",@"message":@"Offline",@"msgId":@"m1",@"date":@100}]};
+    }
+    if ([path hasSuffix:@"/getPermitDeny"] || [path hasSuffix:@"/setPermitDeny"]) {
+        if (![self.request.HTTPMethod isEqual:@"GET"]) status=404;
+        if ([path hasSuffix:@"/setPermitDeny"]) {
+            NSString *mode=Field(forms.lastObject,@"pdMode");
+            if (mode.length) fixturePrivacyMode=mode;
+            if ([Field(forms.lastObject,@"pdBlock") isEqual:@"222"]) fixtureBlocked=YES;
+            else if ([Field(forms.lastObject,@"pdBlockRemove") isEqual:@"222"]) fixtureBlocked=NO;
+            else status=400;
+        }
+        data=@{@"pdMode":fixturePrivacyMode,@"blocks":fixtureBlocked ? @[@"222"] : @[]};
+    }
     if ([path hasSuffix:@"/sendIM"]) { if (failSend) status = 602; else data = @{@"msgId":@"sent-1", @"timestamp":@100}; }
     if ([path hasSuffix:@"/addBuddy"]) {
         if (![[self.request HTTPMethod] isEqualToString:@"GET"]) status = 404;
@@ -432,6 +449,26 @@ int main(void) {
         [heldPoll respondWithData:@{@"events":@[@{@"type":@"im",@"eventData":@{@"source":@{@"aimId":@"222"},@"message":@"Later arrival",@"msgId":@"later-1",@"timestamp":@101}}],@"lastSeqNum":@12,@"timeToNextFetch":@1} status:200]; Pump(0.65);
         [heldPoll respondWithData:@{@"events":@[@{@"type":@"im",@"eventData":@{@"source":@{@"aimId":@"222"},@"message":@"Another arrival",@"msgId":@"later-2",@"timestamp":@102}}],@"lastSeqNum":@13,@"timeToNextFetch":@1} status:200]; Pump(0.65);
         Check(delegate.messageCount==4 && CountRequests(@"/fetchEvents")==pollsBefore+2 && [[forms lastObject] rangeOfString:@"seqNum=13"].location!=NSNotFound,@"repeated server arrivals are received and acknowledged automatically without refresh");
+        __block BOOL blocked=NO, unblocked=NO;
+        [client setBlocked:YES peer:@"222" enableDenyMode:YES completion:^(NSDictionary *privacy,NSError *e) {
+            blocked=!e && [privacy[@"pdMode"] isEqual:@"denySome"] && [JMBlockedUINs(privacy) containsObject:@"222"];
+        }]; Pump(0.4);
+        Check(blocked,@"server block is confirmed by an independent privacy read");
+        [client setBlocked:NO peer:@"222" enableDenyMode:NO completion:^(NSDictionary *privacy,NSError *e) {
+            unblocked=!e && [privacy[@"pdMode"] isEqual:@"denySome"] && ![JMBlockedUINs(privacy) containsObject:@"222"];
+        }]; Pump(0.4);
+        Check(unblocked,@"unblocking preserves the existing privacy mode");
+        __block NSArray *storedRows=nil;
+        [client fetchStoredMessagesForPeer:@"222" completion:^(NSDictionary *data,NSError *e) { if (!e) storedRows=data[@"msgs"]; }]; Pump(0.35);
+        NSDictionary *recovered=JMMessageFromStoredIM(storedRows.firstObject,@"222",@"111");
+        Check([recovered[@"id"] isEqual:incoming[@"id"]] && [recovered[@"timestamp"] isEqual:incoming[@"timestamp"]],@"session recovery and offline delivery agree on message identity");
+        Check(!JMMessageFromStoredIM(@{@"sender":@"333",@"msgId":@"m1",@"date":@100,@"message":@"bad"},@"222",@"111"),@"recovery rejects messages from a different peer");
+        NSURL *recoveryRoot=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]]];
+        JMHistory *recoveryHistory=[[JMHistory alloc] initWithUIN:@"111" root:recoveryRoot];
+        BOOL didInsert=NO;
+        Check([recoveryHistory appendMessage:incoming unread:YES inserted:&didInsert error:NULL] && didInsert,@"first offline delivery is inserted");
+        Check([recoveryHistory appendMessage:recovered unread:YES inserted:&didInsert error:NULL] && !didInsert && [recoveryHistory.unreadCounts[@"222"] integerValue]==1,@"session recovery does not reinsert or recount an offline delivery");
+        [[NSFileManager defaultManager] removeItemAtURL:recoveryRoot error:NULL];
         __block BOOL profileOK=NO;
         [client fetchPresenceForUIN:@"222" completion:^(NSDictionary *data,NSError *e) { profileOK=!e && [JMDictionary([JMArray(data[@"users"]) firstObject])[@"friendly"] isEqualToString:@"Profile Name"]; }]; Pump(0.3);
         Check(profileOK && [[forms lastObject] rangeOfString:@"t=222"].location!=NSNotFound,@"profile presence lookup resolves friendly name");

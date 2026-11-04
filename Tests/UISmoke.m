@@ -30,6 +30,9 @@
 #import <math.h>
 
 @interface JMAppDelegate (SmokeAccess)
+- (void)toggleGroup:(NSString *)group;
+- (void)toggleUnreadFilter:(id)sender;
+- (void)restoreRecentMessages:(id)sender;
 - (NSTimeInterval)systemIdleSeconds;
 - (void)autoAwayTick:(id)sender;
 - (void)workspaceDidWake:(NSNotification *)notification;
@@ -60,6 +63,8 @@
 - (void)toggleAutomaticUpdates:(id)sender;
 - (void)automaticUpdateTick:(id)sender;
 - (void)checkUpdatesAutomatically:(BOOL)automatic;
+- (void)checkForUpdates:(id)sender;
+- (void)closeUpdateWindow:(id)sender;
 - (void)presentPendingUpdateIfPossible;
 - (BOOL)canPresentAutomaticUpdate;
 - (void)presentUpdateRelease:(NSDictionary *)release automatic:(BOOL)automatic;
@@ -158,9 +163,21 @@
 @property(nonatomic,strong) NSDictionary *releaseInfo;
 @property(nonatomic,strong) NSError *error;
 @property(nonatomic) NSUInteger checks;
+@property(nonatomic) BOOL holdResponse;
+@property(nonatomic,copy) void (^pending)(NSDictionary *,NSError *);
+- (void)finish;
 @end
 @implementation UIUpdateChecker
-- (void)check:(void (^)(NSDictionary *,NSError *))completion { self.checks++; completion(self.releaseInfo,self.error); }
+- (void)check:(void (^)(NSDictionary *,NSError *))completion {
+    self.checks++;
+    if (self.holdResponse) self.pending=completion;
+    else completion(self.releaseInfo,self.error);
+}
+- (void)finish {
+    void (^completion)(NSDictionary *,NSError *)=self.pending;
+    self.pending=nil;
+    if (completion) completion(self.releaseInfo,self.error);
+}
 @end
 static NSUserDefaults *testAlertDefaults;
 static NSURL *testDraftRoot;
@@ -253,7 +270,7 @@ static NSURL *testDraftRoot;
 - (void)completeTermination { self.terminationReplies++; }
 - (void)scheduleAutomaticUpdateChecks {} // No real update requests during fictional UI tests.
 - (BOOL)canPresentAutomaticUpdate { return self.allowUpdatePresentation ? self.allowUpdatePresentation.boolValue : [super canPresentAutomaticUpdate]; }
-- (void)presentUpdateRelease:(NSDictionary *)release automatic:(BOOL)automatic { self.presentedUpdateVersion=release[@"version"]; if (automatic) self.automaticUpdateNotices++; }
+- (void)presentUpdateRelease:(NSDictionary *)release automatic:(BOOL)automatic { self.presentedUpdateVersion=release[@"version"]; if (automatic) self.automaticUpdateNotices++; else [super presentUpdateRelease:release automatic:NO]; }
 - (BOOL)openExternalURL:(NSURL *)url { self.openedURL=url; return YES; }
 - (void)showError:(NSString *)title detail:(NSString *)detail { self.lastError=detail; }
 - (JMLoginStore *)makeLoginStore { return [[FakeLoginStore alloc] init]; }
@@ -276,6 +293,7 @@ static NSURL *testDraftRoot;
 - (void)showMainWindow:(id)sender { self.showWindowCount++; [super showMainWindow:sender]; }
 @end
 @interface UIClient : JMAPIClient
+@property(nonatomic,strong) NSArray *storedRows;
 @property(nonatomic) BOOL holdPresence;
 @property(nonatomic,copy) void (^pendingPresence)(NSDictionary *,NSError *);
 @property(nonatomic) NSUInteger reconnects;
@@ -306,6 +324,7 @@ static NSURL *testDraftRoot;
 @property(nonatomic, copy) NSString *loginUIN;
 @end
 @implementation UIClient
+- (void)fetchStoredMessagesForPeer:(NSString *)peer completion:(void (^)(NSDictionary *,NSError *))completion { completion(@{@"msgs":self.storedRows ?: @[]},nil); }
 - (void)reconnect { self.reconnects++; }
 - (id)init { self=[super init]; if (self) { self.rosterCalls=[NSMutableArray array]; self.ownCalls=[NSMutableArray array]; self.ownNames=[@{@"firstName":@"Иван",@"lastName":@"Тестовый"} mutableCopy]; self.ownAbout=@"Люблю старые Mac и простые мессенджеры."; self.ownCaption=@"На связи со старого Mac"; } return self; }
 - (void)rosterReply:(NSString *)action completion:(void (^)(NSDictionary *,NSError *))completion {
@@ -529,7 +548,7 @@ int main(int argc, const char *argv[]) {
         [delegate client:client changedStatus:@"В сети · тестовые данные" connected:YES];
         if (getenv("JIMMMAC_IMPROVEMENTS_ONLY")) {
             [delegate setValue:@"111" forKey:@"accountUIN"]; [delegate setValue:[[FixtureAvatarStore alloc] init] forKey:@"avatars"];
-            ImprovementUI(delegate,output); [[NSFileManager defaultManager] removeItemAtURL:root error:NULL]; printf("PASS: %lu focused improvement UI checks\n",(unsigned long)uiChecks); return 0;
+            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); [[NSFileManager defaultManager] removeItemAtURL:root error:NULL]; printf("PASS: %lu focused improvement UI checks\n",(unsigned long)uiChecks); return 0;
         }
         {
             NSTextField *account=[delegate valueForKey:@"accountLabel"], *connection=[delegate valueForKey:@"statusLabel"];
@@ -1324,13 +1343,13 @@ int main(int argc, const char *argv[]) {
             CheckUI(NSHeight(largePreview.frame)>=40 && !NSIntersectsRect(largePreview.frame,smileSetting.frame),"largest font preview and smiley preference have separate readable areas");
             Capture([delegate valueForKey:@"preferencesWindow"],[output stringByAppendingPathComponent:@"UI-daily-preferences.png"]);
             [fontPreferences setFamily:previousFamily size:previousSize]; [delegate applyChatFont]; [delegate closePreferences:nil];
-            UIUpdateChecker *updates=[[UIUpdateChecker alloc] init]; updates.releaseInfo=@{@"version":@"0.16.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.16.0"],@"notes":@"Fixture release"};
+            UIUpdateChecker *updates=[[UIUpdateChecker alloc] init]; updates.releaseInfo=@{@"version":@"0.17.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.17.0"],@"notes":@"Fixture release"};
             [delegate setValue:updates forKey:@"updateChecker"]; delegate.allowUpdatePresentation=@NO;
             [testAlertDefaults removeObjectForKey:@"UpdateNoticeShownVersion"]; [testAlertDefaults removeObjectForKey:@"LastSuccessfulUpdateCheck"];
             [delegate checkUpdatesAutomatically:YES]; PumpUI(0.05);
             CheckUI(updates.checks==1 && delegate.automaticUpdateNotices==0 && [delegate valueForKey:@"pendingUpdateRelease"]!=nil,"automatic update defers popup while login, sheet or auxiliary window has focus");
             delegate.allowUpdatePresentation=@YES; [delegate presentPendingUpdateIfPossible]; PumpUI(0.05);
-            CheckUI(delegate.automaticUpdateNotices==1 && [delegate.presentedUpdateVersion isEqual:@"0.16.0"],"available update opens automatically when main conversation is ready");
+            CheckUI(delegate.automaticUpdateNotices==1 && [delegate.presentedUpdateVersion isEqual:@"0.17.0"],"available update opens automatically when main conversation is ready");
             [delegate presentPendingUpdateIfPossible]; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
             CheckUI(delegate.automaticUpdateNotices==1 && updates.checks==1,"same update is shown once and network is not polled again within six hours");
             [testAlertDefaults setObject:[NSDate dateWithTimeIntervalSinceNow:-7*3600] forKey:@"LastSuccessfulUpdateCheck"]; updates.releaseInfo=@{@"version":@"0.13.0"}; [delegate automaticUpdateTick:nil]; PumpUI(0.05);
@@ -1466,9 +1485,21 @@ int main(int argc, const char *argv[]) {
             ImprovementEnglishUI(english,output);
             NSMenuItem *back=[[NSMenuItem alloc] init]; back.representedObject=@"current"; [english changeAppearance:back]; [[english valueForKey:@"rosterWindow"] orderOut:nil];
             [englishLogin orderOut:nil]; [[english valueForKey:@"chatWindow"] orderOut:nil];
+            for (NSString *language in @[@"uk",@"be"]) {
+                [testAlertDefaults setObject:language forKey:@"InterfaceLanguage"];
+                SmokeDelegate *localized=[[SmokeDelegate alloc] init]; [localized applicationDidFinishLaunching:nil];
+                CheckUI([JMLanguage() isEqual:language],"launch restores the selected Cyrillic language");
+                NSWindow *login=[localized valueForKey:@"loginWindow"];
+                CheckUI([[[localized valueForKey:@"loginButton"] title] isEqual:([language isEqual:@"uk"] ? @"Увійти" : @"Увайсці")],"login uses the selected Cyrillic language");
+                CheckUtilityBounds(login);
+                Capture(login,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"UI-016-%@-login.png",language]]);
+                [localized showPreferences:nil]; NSSegmentedControl *sections=[localized valueForKey:@"preferenceSections"];
+                for (NSInteger i=0;i<5;i++) { sections.selectedSegment=i; [localized changePreferenceSection:nil]; CheckUtilityBounds([localized valueForKey:@"preferencesWindow"]); }
+                [localized closePreferences:nil]; [login orderOut:nil];
+            }
             JMSetLanguage(@"ru"); [testAlertDefaults setObject:@"ru" forKey:@"InterfaceLanguage"]; [app setDelegate:delegate];
 
-            ImprovementUI(delegate,output);
+            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output);
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
             emptyView=[delegate valueForKey:@"conversationEmptyView"]; emptyFits=YES;
             for (NSView *view in emptyView.subviews) if (!view.hidden && !NSContainsRect(emptyView.bounds,view.frame)) emptyFits=NO;

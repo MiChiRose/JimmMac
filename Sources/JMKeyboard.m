@@ -77,6 +77,20 @@ JM_WINDOW_COMMANDS
 @end
 
 @implementation JMContactTable
+- (void)drawBackgroundInClipRect:(NSRect)clip {
+    if (!self.blueRosterGradient) { [super drawBackgroundInClipRect:clip]; return; }
+    NSGradient *gradient=[[NSGradient alloc] initWithStartingColor:[NSColor colorWithSRGBRed:0.97 green:0.985 blue:1 alpha:1]
+                                                        endingColor:[NSColor colorWithSRGBRed:0.82 green:0.90 blue:0.99 alpha:1]];
+    [gradient drawInRect:NSMakeRect(0,NSMinY(clip),NSWidth(self.bounds),NSHeight(clip)) angle:0];
+}
+- (void)mouseDown:(NSEvent *)event {
+    if (self.handleHeaderClick && self.isEnabled) {
+        NSPoint point=[self convertPoint:event.locationInWindow fromView:nil];
+        NSInteger row=[self rowAtPoint:point];
+        if (row>=0 && self.handleHeaderClick(row,point.y-NSMinY([self rectOfRow:row]))) return;
+    }
+    [super mouseDown:event];
+}
 - (void)keyDown:(NSEvent *)event {
     NSUInteger flags=event.modifierFlags & (NSCommandKeyMask|NSControlKeyMask|NSAlternateKeyMask|NSShiftKeyMask);
     NSString *key=event.charactersIgnoringModifiers;

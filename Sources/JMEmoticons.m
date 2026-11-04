@@ -1,27 +1,131 @@
 #import "JMEmoticons.h"
 #import "JMTheme.h"
-static NSImage *Face(BOOL sad,BOOL wink) {
-    NSImage *image=[[NSImage alloc] initWithSize:NSMakeSize(16,16)]; [image lockFocus];
-    NSBezierPath *circle=[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(0.5,0.5,15,15)];
-    [[NSColor colorWithCalibratedRed:1 green:0.86 blue:0.22 alpha:1] setFill]; [circle fill];
-    [[NSColor colorWithCalibratedRed:0.62 green:0.44 blue:0.06 alpha:1] setStroke]; [circle setLineWidth:1]; [circle stroke];
-    [[NSColor colorWithCalibratedWhite:0.2 alpha:1] set];
-    [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(4,9,2,2)] fill];
-    if (wink) { NSBezierPath *eye=[NSBezierPath bezierPath]; [eye moveToPoint:NSMakePoint(10,10)]; [eye lineToPoint:NSMakePoint(12,10)]; [eye stroke]; }
-    else [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(10,9,2,2)] fill];
-    NSBezierPath *mouth=[NSBezierPath bezierPath]; [mouth moveToPoint:NSMakePoint(4,5)];
-    [mouth curveToPoint:NSMakePoint(12,5) controlPoint1:NSMakePoint(6,sad ? 9 : 1) controlPoint2:NSMakePoint(10,sad ? 9 : 1)]; mouth.lineWidth=1.2; [mouth stroke]; [image unlockFocus]; return image;
+#import "JMStyle.h"
+
+NSArray *JMSmileyCodes(void) {
+    return @[@":)", @":(", @";)", @":D", @":P", @":'(", @"8-)", @":-*", @"=-O", @"O:-)"];
 }
-NSImage *JMClassicSmileyImage(void) { static NSImage *image; if (!image) image=Face(NO,NO); return image; }
+
+static NSString *JMSmileyResourceName(NSString *code) {
+    static NSDictionary *names;
+    static dispatch_once_t once;
+    dispatch_once(&once,^{
+        names=@{@":)":@"smile", @":(":@"sad", @";)":@"wink", @":d":@"laugh",
+                @":p":@"tongue", @":'(":@"cry", @"8)":@"cool", @":*":@"kiss",
+                @"=o":@"shock", @"o:)":@"angel"};
+    });
+    NSString *key=[[code lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@""];
+    NSString *name=names[key];
+    return name ? [@"smiley-" stringByAppendingString:name] : nil;
+}
+
+NSImage *JMSmileyImage(NSString *code) {
+    NSString *name=JMSmileyResourceName(code);
+    return name ? JMRetroImage(name) : nil;
+}
+
+NSImage *JMClassicSmileyImage(void) { return JMSmileyImage(@":)"); }
+
+@interface JMAnimatedSmiley : NSObject
+@property(nonatomic,copy) NSArray *frames;
+@property(nonatomic,copy) NSArray *endTimes;
+@property(nonatomic) NSTimeInterval duration;
+@end
+@implementation JMAnimatedSmiley
+@end
+
+static JMAnimatedSmiley *JMAnimationForSmiley(NSString *code) {
+    JMThemeMode theme=JMTheme();
+    if (theme!=JMThemeCurrent && theme!=JMThemeJimm && theme!=JMThemeQIP) return nil;
+    NSString *pack=theme==JMThemeQIP ? @"qip" : @"jimm";
+    NSString *name=JMSmileyResourceName(code);
+    if (!name) return nil;
+    static NSMutableDictionary *cache;
+    if (!cache) cache=[NSMutableDictionary dictionary];
+    NSString *key=[pack stringByAppendingPathComponent:name];
+    id cached=cache[key];
+    if (cached) return cached==[NSNull null] ? nil : cached;
+
+    NSURL *url=JMRetroResourceURL(name,@"gif",pack);
+    NSData *data=url ? [NSData dataWithContentsOfURL:url] : nil;
+    NSBitmapImageRep *bitmap=data ? [NSBitmapImageRep imageRepWithData:data] : nil;
+    NSInteger count=[[bitmap valueForProperty:NSImageFrameCount] integerValue];
+    NSMutableArray *frames=[NSMutableArray array], *endTimes=[NSMutableArray array];
+    NSTimeInterval duration=0;
+    for (NSInteger i=0;i<count;i++) {
+        [bitmap setProperty:NSImageCurrentFrame withValue:@(i)];
+        CGImageRef frame=bitmap.CGImage;
+        if (!frame) break;
+        NSSize size=NSMakeSize(CGImageGetWidth(frame),CGImageGetHeight(frame));
+        [frames addObject:[[NSImage alloc] initWithCGImage:frame size:size]];
+        NSTimeInterval delay=[[bitmap valueForProperty:NSImageCurrentFrameDuration] doubleValue];
+        duration+=delay>0 ? delay : 0.1;
+        [endTimes addObject:@(duration)];
+    }
+    JMAnimatedSmiley *animation=nil;
+    if (frames.count>1) {
+        animation=[[JMAnimatedSmiley alloc] init];
+        animation.frames=frames; animation.endTimes=endTimes; animation.duration=duration;
+    }
+    cache[key]=animation ?: (id)[NSNull null];
+    return animation;
+}
+
+@interface JMTranscriptView ()
+@property(nonatomic,strong) NSTimer *smileyTimer;
+@property(nonatomic) NSRect smileyDirtyRect;
+- (void)requestSmileyRedrawInRect:(NSRect)rect after:(NSTimeInterval)delay;
+@end
+
+@interface JMAnimatedSmileyCell : NSTextAttachmentCell
+@property(nonatomic,strong) JMAnimatedSmiley *animation;
+@property(nonatomic) NSTimeInterval startedAt;
+@end
+@implementation JMAnimatedSmileyCell
+- (void)drawWithFrame:(NSRect)frame inView:(NSView *)view {
+    if (![view isKindOfClass:[JMTranscriptView class]]) {
+        [super drawWithFrame:frame inView:view];
+        return;
+    }
+    NSTimeInterval now=[[NSProcessInfo processInfo] systemUptime];
+    if (!self.startedAt) self.startedAt=now;
+    NSTimeInterval time=fmod(now-self.startedAt,self.animation.duration);
+    NSUInteger index=0;
+    while (index+1<self.animation.frames.count && time>=[self.animation.endTimes[index] doubleValue]) index++;
+    NSImage *image=self.animation.frames[index];
+    [image drawInRect:frame fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1 respectFlipped:YES hints:nil];
+    NSTimeInterval remaining=[self.animation.endTimes[index] doubleValue]-time;
+    [(JMTranscriptView *)view requestSmileyRedrawInRect:frame after:remaining];
+}
+- (void)drawWithFrame:(NSRect)frame inView:(NSView *)view characterIndex:(NSUInteger)index {
+    [self drawWithFrame:frame inView:view];
+}
+- (void)drawWithFrame:(NSRect)frame inView:(NSView *)view characterIndex:(NSUInteger)index layoutManager:(NSLayoutManager *)layoutManager {
+    [self drawWithFrame:frame inView:view];
+}
+@end
+
 void JMApplyEmoticons(NSMutableAttributedString *text) {
-    static NSRegularExpression *pattern; static NSDictionary *images; static dispatch_once_t once;
-    dispatch_once(&once,^{ pattern=[NSRegularExpression regularExpressionWithPattern:@"(?<![\\p{L}\\p{N}:/])[:;]-?[)(](?![\\p{L}\\p{N}])" options:0 error:NULL]; images=@{@"smile":Face(NO,NO),@"sad":Face(YES,NO),@"wink":Face(NO,YES)}; });
+    static NSRegularExpression *pattern;
+    static dispatch_once_t once;
+    dispatch_once(&once,^{
+        pattern=[NSRegularExpression regularExpressionWithPattern:
+                 @"(?<![\\p{L}\\p{N}:/])(?:o:-?\\)|:'-?\\(|8-?\\)|=-?o|;-?\\)|:-?[()dp*])(?![\\p{L}\\p{N}])"
+                    options:NSRegularExpressionCaseInsensitive error:NULL];
+    });
     NSArray *matches=[pattern matchesInString:text.string options:0 range:NSMakeRange(0,text.length)];
     for (NSTextCheckingResult *match in [matches reverseObjectEnumerator]) {
         if ([text attribute:NSLinkAttributeName atIndex:match.range.location effectiveRange:NULL]) continue;
         NSString *original=[text.string substringWithRange:match.range];
+        NSImage *image=JMSmileyImage(original);
+        if (!image) continue;
         NSTextAttachment *attachment=[[NSTextAttachment alloc] init];
-        attachment.attachmentCell=[[NSTextAttachmentCell alloc] initImageCell:images[[original hasPrefix:@";"] ? @"wink" : ([original hasSuffix:@"("] ? @"sad" : @"smile")]];
+        JMAnimatedSmiley *animation=JMAnimationForSmiley(original);
+        if (animation) {
+            JMAnimatedSmileyCell *cell=[[JMAnimatedSmileyCell alloc] initImageCell:animation.frames[0]];
+            cell.animation=animation;
+            attachment.attachmentCell=cell;
+        } else attachment.attachmentCell=[[NSTextAttachmentCell alloc] initImageCell:image];
         NSMutableAttributedString *replacement=[[NSAttributedString attributedStringWithAttachment:attachment] mutableCopy];
         NSDictionary *attributes=[text attributesAtIndex:match.range.location effectiveRange:NULL];
         [replacement addAttributes:attributes range:NSMakeRange(0,replacement.length)];
@@ -30,6 +134,25 @@ void JMApplyEmoticons(NSMutableAttributedString *text) {
     }
 }
 @implementation JMTranscriptView
+- (void)requestSmileyRedrawInRect:(NSRect)rect after:(NSTimeInterval)delay {
+    if (!self.window.isVisible || self.window.isMiniaturized || self.isHiddenOrHasHiddenAncestor ||
+        !NSIntersectsRect(self.visibleRect,rect)) return;
+    self.smileyDirtyRect=NSUnionRect(self.smileyDirtyRect,rect);
+    NSDate *nextFrame=[NSDate dateWithTimeIntervalSinceNow:MAX(0.01,delay)];
+    if (self.smileyTimer && [self.smileyTimer.fireDate compare:nextFrame]!=NSOrderedDescending) return;
+    [self.smileyTimer invalidate];
+    self.smileyTimer=[[NSTimer alloc] initWithFireDate:nextFrame interval:0 target:self
+        selector:@selector(redrawSmileyFrames:) userInfo:nil repeats:NO];
+    [[NSRunLoop mainRunLoop] addTimer:self.smileyTimer forMode:NSRunLoopCommonModes];
+}
+- (void)redrawSmileyFrames:(NSTimer *)timer {
+    self.smileyTimer=nil;
+    NSRect dirty=self.smileyDirtyRect;
+    self.smileyDirtyRect=NSZeroRect;
+    if (self.window.isVisible && !self.window.isMiniaturized && !self.isHiddenOrHasHiddenAncestor) {
+        [self setNeedsDisplayInRect:NSIntersectionRect(self.visibleRect,dirty)];
+    }
+}
 - (void)drawViewBackgroundInRect:(NSRect)rect {
     [super drawViewBackgroundInRect:rect]; if (JMTheme()!=JMThemeMac2011 || !self.textStorage.length) return;
     NSLayoutManager *layout=self.layoutManager; NSPoint origin=self.textContainerOrigin;

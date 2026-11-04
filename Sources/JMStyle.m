@@ -4,23 +4,20 @@
 #import <ImageIO/ImageIO.h>
 static void JMDrawMacHeader(NSRect rect);
 NSImage *JMStatusImage(NSString *state) {
-    static NSMutableDictionary *images;
-    if (!images) images=[NSMutableDictionary dictionary];
-    NSDictionary *frames=@{@"online":@7,@"freeForChat":@7,@"away":@0,@"na":@0,@"dnd":@2,@"occupied":@5,@"invisible":@3,@"offline":@6};
-    NSNumber *frame=frames[state ?: @""] ?: @6;
-    NSImage *image=images[frame]; if (image) return image;
-    NSString *path=[[NSBundle mainBundle] pathForResource:@"JimmStatusSprite" ofType:@"png"];
-    if (!path) path=[[[[NSBundle mainBundle] executablePath] stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"../Resources/JimmStatusSprite.png"];
-    CGImageSourceRef source=CGImageSourceCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path],NULL);
-    if (source) {
-        CGImageRef sheet=CGImageSourceCreateImageAtIndex(source,0,NULL); CFRelease(source);
-        if (sheet) {
-            CGImageRef icon=CGImageCreateWithImageInRect(sheet,CGRectMake([frame integerValue]*16,0,16,16)); CGImageRelease(sheet);
-            if (icon) { image=[[NSImage alloc] initWithCGImage:icon size:NSMakeSize(16,16)]; CGImageRelease(icon); }
-        }
+    static NSArray *knownStates;
+    static dispatch_once_t once;
+    dispatch_once(&once,^{
+        knownStates=@[@"online",@"offline",@"away",@"na",@"dnd",@"occupied",@"invisible",@"freeForChat"];
+    });
+    NSString *status=state && [knownStates containsObject:state] ? state : @"offline";
+    // AIR has one original icon for each of these broader presence categories.
+    if (JMTheme()==JMThemeMac2011) {
+        if ([status isEqual:@"freeForChat"]) status=@"online";
+        if ([status isEqual:@"na"]) status=@"away";
+        if ([status isEqual:@"occupied"]) status=@"dnd";
     }
-    if (image) images[frame]=image;
-    return image ?: [NSImage imageNamed:NSImageNameStatusNone];
+    NSImage *original=JMRetroImage([@"status-" stringByAppendingString:status]);
+    return original ?: [NSImage imageNamed:NSImageNameStatusNone];
 }
 NSImage *JMFlowerImage(void) {
     static NSImage *image;
@@ -39,11 +36,20 @@ NSColor *JMLegacyHeaderBottomColor(void) { return JMThemeHeaderBottom(); }
     NSColor *top = self.topColor ?: [NSColor colorWithCalibratedWhite:0.97 alpha:1];
     NSColor *bottom = self.bottomColor ?: [NSColor colorWithCalibratedWhite:0.84 alpha:1];
     if (JMTheme()==JMThemeMac2011 && [top isEqual:JMThemeHeaderTop()] && [bottom isEqual:JMThemeHeaderBottom()]) { JMDrawMacHeader(self.bounds); return; }
+    if (JMTheme()==JMThemeQIP && [top isEqual:JMThemeHeaderTop()] && [bottom isEqual:JMThemeHeaderBottom()]) {
+        CGFloat height=NSHeight(self.bounds);
+        NSRect face=NSMakeRect(0,4,NSWidth(self.bounds),MAX(0,height-4));
+        [[[NSGradient alloc] initWithStartingColor:bottom endingColor:top] drawInRect:face angle:90];
+        [top setFill]; NSRectFill(NSMakeRect(0,0,NSWidth(self.bounds),MIN(4,height)));
+        return;
+    }
     [[[NSGradient alloc] initWithStartingColor:bottom endingColor:top] drawInRect:self.bounds angle:90];
     [[NSColor colorWithCalibratedWhite:0.68 alpha:1] setFill]; NSRectFill(NSMakeRect(0,0,NSWidth(self.bounds),1));
 }
 @end
 NSColor *JMSelectionColor(BOOL emphasized) {
+    if (JMTheme()==JMThemeJimm) return emphasized ? [NSColor colorWithSRGBRed:0.57 green:0.08 blue:0.07 alpha:1] : [NSColor colorWithCalibratedWhite:0.73 alpha:1];
+    if (JMTheme()==JMThemeQIP) return emphasized ? [NSColor colorWithSRGBRed:0.20 green:0.38 blue:0.60 alpha:1] : [NSColor colorWithSRGBRed:0.80 green:0.88 blue:0.96 alpha:1];
     if (JMTheme()==JMThemeMac2011) return emphasized ? [NSColor colorWithSRGBRed:217.0/255 green:227.0/255 blue:204.0/255 alpha:1] : [NSColor whiteColor];
     if (JMTheme()==JMThemePro2003) return emphasized ? [NSColor colorWithCalibratedRed:0.05 green:0.14 blue:0.44 alpha:1] : [NSColor colorWithCalibratedWhite:0.83 alpha:1];
     return emphasized ? [NSColor colorWithCalibratedRed:0.25 green:0.42 blue:0.65 alpha:1] : [NSColor colorWithCalibratedRed:0.80 green:0.84 blue:0.88 alpha:1];
@@ -94,7 +100,7 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     self.writeButton=[[JMThemedButton alloc] initWithFrame:NSZeroRect]; self.writeButton.bezelStyle=NSRoundedBezelStyle; self.writeButton.title=JML(@"Написать по UIN…");
     self.writeButton.toolTip=JML(@"Открыть новую переписку по номеру UIN"); [self addSubview:self.writeButton]; [self setHasPeer:NO]; return self;
 }
-- (void)drawRect:(NSRect)dirtyRect { [[NSColor textBackgroundColor] setFill]; NSRectFill(dirtyRect); }
+- (void)drawRect:(NSRect)dirtyRect { [JMThemeTranscriptColor() setFill]; NSRectFill(dirtyRect); }
 - (void)setHasPeer:(BOOL)hasPeer {
     self.titleLabel.stringValue=hasPeer ? JML(@"Пока нет сообщений") : JML(@"Здесь начнётся переписка");
     self.detailLabel.stringValue=hasPeer ? JML(@"Напишите первое сообщение. Черновик можно подготовить даже без сети.") : JML(@"Выберите контакт слева или начните разговор по UIN.");
@@ -104,8 +110,13 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     CGFloat width=MIN(420,MAX(0,NSWidth(self.bounds)-40)), center=floor(NSWidth(self.bounds)/2);
     if (JMTheme()!=JMThemeCurrent) {
         self.flower.hidden=YES; self.titleLabel.font=[NSFont boldSystemFontOfSize:13]; self.detailLabel.font=[NSFont systemFontOfSize:11];
-        CGFloat height=NSHeight(self.bounds); self.titleLabel.frame=NSMakeRect(center-width/2,MAX(0,height-35),width,20); self.detailLabel.frame=NSMakeRect(center-width/2,MAX(0,height-76),width,36);
-        self.writeButton.frame=NSMakeRect(center-96,MAX(2,height-108),192,23); return;
+        CGFloat height=NSHeight(self.bounds);
+        CGFloat blockHeight=self.writeButton.isHidden ? 60 : 87;
+        CGFloat top=MIN(height,floor((height+blockHeight)/2));
+        self.titleLabel.frame=NSMakeRect(center-width/2,top-20,width,20);
+        self.detailLabel.frame=NSMakeRect(center-width/2,top-59,width,36);
+        self.writeButton.frame=NSMakeRect(center-96,MAX(0,top-87),192,23);
+        return;
     }
     self.flower.hidden=NO; self.titleLabel.font=[NSFont boldSystemFontOfSize:17]; self.detailLabel.font=[NSFont systemFontOfSize:12];
     CGFloat top=floor((NSHeight(self.bounds)+(self.writeButton.isHidden ? 150 : 200))/2);
@@ -162,10 +173,20 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     self.badge=[[JMUnreadBadge alloc] initWithFrame:NSZeroRect]; [self addSubview:self.badge]; [self layoutContents]; return self;
 }
 - (void)layoutContents {
+    for (NSView *view in self.subviews) view.hidden=self.groupOnly;
+    if (self.groupOnly) return;
     CGFloat width=NSWidth(self.bounds), height=NSHeight(self.bounds)-[self groupHeaderHeight];
     BOOL person=[self.identifier isEqual:@"person"], compact=JMTheme()==JMThemePro2003 && person, mac=JMTheme()==JMThemeMac2011 && person;
     self.imageView.hidden=compact; self.detailLabel.hidden=compact || (mac && (!self.detailLabel.stringValue.length || height<32));
     CGFloat badgeWidth=self.badge.text.length ? MAX(18,[self.badge.text sizeWithAttributes:@{NSFontAttributeName:[NSFont boldSystemFontOfSize:10]}].width+10) : 0;
+    if (JMThemeIsMobile() && person) {
+        self.presenceImage.frame=NSMakeRect(8,floor((height-20)/2),20,20);
+        self.imageView.hidden=YES;
+        self.textField.frame=NSMakeRect(34,height-22,MAX(0,width-42-(badgeWidth ? badgeWidth+5 : 0)),18);
+        self.detailLabel.frame=NSMakeRect(34,1,MAX(0,width-42-(badgeWidth ? badgeWidth+5 : 0)),14);
+        self.timestampLabel.hidden=YES; self.badge.frame=NSMakeRect(width-6-badgeWidth,floor((height-18)/2),badgeWidth,18);
+        self.badge.hidden=badgeWidth==0; return;
+    }
     if (compact) {
         self.presenceImage.frame=NSMakeRect(5,floor((height-16)/2),16,16);
         self.textField.frame=NSMakeRect(25,floor((height-17)/2),MAX(0,width-31-(badgeWidth ? badgeWidth+5 : 0)),17);
@@ -185,25 +206,36 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     self.detailLabel.frame=NSMakeRect(56,height<50 ? 2 : 10,MAX(0,width-68-(badgeWidth ? badgeWidth+8 : 0)),17);
     self.badge.frame=NSMakeRect(width-12-badgeWidth,height<50 ? 2 : 10,badgeWidth,18); self.badge.hidden=badgeWidth==0;
 }
-- (CGFloat)groupHeaderHeight { return self.groupTitle.length && [self.identifier isEqual:@"person"] && JMTheme()!=JMThemeCurrent ? (JMTheme()==JMThemePro2003 ? 17 : 21) : 0; }
+- (CGFloat)groupHeaderHeight { return self.groupTitle.length && [self.identifier isEqual:@"person"] ? (JMTheme()==JMThemePro2003 ? 17 : 23) : 0; }
+- (void)setGroupOnly:(BOOL)only { _groupOnly=only; [self layoutContents]; self.needsDisplay=YES; }
 - (void)setGroupTitle:(NSString *)title { _groupTitle=[title copy]; [self layoutContents]; self.needsDisplay=YES; }
 - (void)drawRect:(NSRect)dirtyRect {
     [super drawRect:dirtyRect]; CGFloat header=[self groupHeaderHeight]; if (!header) return;
     NSRect rect=NSMakeRect(0,NSHeight(self.bounds)-header,NSWidth(self.bounds),header);
     BOOL pro=JMTheme()==JMThemePro2003;
     [(pro ? [NSColor whiteColor] : [NSColor colorWithSRGBRed:222.0/255 green:224.0/255 blue:214.0/255 alpha:1]) setFill]; NSRectFill(rect);
-    NSMutableParagraphStyle *style=[[NSMutableParagraphStyle alloc] init]; style.alignment=pro ? NSCenterTextAlignment : NSLeftTextAlignment; style.lineBreakMode=NSLineBreakByTruncatingTail;
+    NSMutableParagraphStyle *style=[[NSMutableParagraphStyle alloc] init]; style.alignment=pro || JMTheme()==JMThemeQIP ? NSCenterTextAlignment : NSLeftTextAlignment; style.lineBreakMode=NSLineBreakByTruncatingTail;
     NSFont *font=pro ? [NSFont systemFontOfSize:10] : [NSFont boldSystemFontOfSize:11];
     if (pro) { [[NSColor colorWithCalibratedWhite:0.6 alpha:1] setFill]; NSRectFill(NSMakeRect(4,NSMidY(rect),NSWidth(rect)-8,1)); CGFloat w=[self.groupTitle sizeWithAttributes:@{NSFontAttributeName:font}].width+10; [[NSColor whiteColor] setFill]; NSRectFill(NSMakeRect(NSMidX(rect)-w/2,rect.origin.y,w,header)); }
-    [self.groupTitle drawInRect:NSInsetRect(rect,pro ? 6 : 9,3) withAttributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:[NSColor colorWithCalibratedWhite:0.25 alpha:1],NSParagraphStyleAttributeName:style}];
+    if (JMTheme()==JMThemeJimm) { [[NSColor colorWithCalibratedWhite:0.72 alpha:1] setFill]; NSRectFill(rect); }
+    if (JMTheme()==JMThemeQIP) {
+        NSColor *paper=[NSColor colorWithCalibratedRed:0.88 green:0.94 blue:0.99 alpha:1];
+        [paper setFill]; NSRectFill(rect);
+        [[NSColor colorWithCalibratedRed:0.61 green:0.67 blue:0.73 alpha:1] setFill];
+        NSRectFill(NSMakeRect(5,floor(NSMidY(rect)),NSWidth(rect)-10,1));
+        CGFloat w=MIN(NSWidth(rect)-14,[self.groupTitle sizeWithAttributes:@{NSFontAttributeName:font}].width+16);
+        [paper setFill]; NSRectFill(NSMakeRect(NSMidX(rect)-w/2,NSMinY(rect),w,header));
+    }
+    [self.groupTitle drawInRect:NSInsetRect(rect,pro ? 6 : 9,3) withAttributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:JMTheme()==JMThemeQIP ? [NSColor colorWithCalibratedRed:0.10 green:0.20 blue:0.43 alpha:1] : [NSColor colorWithCalibratedWhite:0.20 alpha:1],NSParagraphStyleAttributeName:style}];
 }
 
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize { [super resizeSubviewsWithOldSize:oldSize]; [self layoutContents]; }
 - (void)configureName:(NSString *)name detail:(NSString *)detail state:(NSString *)state unread:(NSInteger)unread {
     self.textField.stringValue=name; self.detailLabel.stringValue=detail; self.unread=unread;
-    CGFloat size=[self.identifier isEqual:@"person"] && JMTheme()!=JMThemeCurrent ? 11 : 13;
-    self.textField.font=unread>0 || (JMTheme()==JMThemeMac2011 && [self.identifier isEqual:@"person"]) ? [NSFont boldSystemFontOfSize:size] : [NSFont systemFontOfSize:size];
-    self.detailLabel.font=[NSFont systemFontOfSize:JMTheme()==JMThemeMac2011 ? 10 : 11];
+    BOOL person=[self.identifier isEqual:@"person"];
+    CGFloat size=person && JMTheme()!=JMThemeCurrent ? (JMThemeIsMobile() ? 13 : 11) : 13;
+    self.textField.font=unread>0 || (person && (JMTheme()==JMThemeMac2011 || JMTheme()==JMThemeJimm)) ? [NSFont boldSystemFontOfSize:size] : [NSFont systemFontOfSize:size];
+    self.detailLabel.font=[NSFont systemFontOfSize:JMTheme()==JMThemeMac2011 || JMThemeIsMobile() ? 10 : 11];
     self.badge.text=unread>99 ? @"99+" : (unread>0 ? [NSString stringWithFormat:@"%ld",(long)unread] : @"");
     self.badge.toolTip=unread>0 ? [NSString stringWithFormat:JML(@"Непрочитанных сообщений: %ld"),(long)unread] : nil;
     // The native text-field cell exposes the exact count to Accessibility;
@@ -216,10 +248,10 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     self.timestampLabel.stringValue=timestamp ?: @""; self.timestampLabel.toolTip=nil; self.draft=draft; [self layoutContents]; [self setBackgroundStyle:self.backgroundStyle];
 }
 - (void)setTimestampTooltip:(NSString *)tooltip { self.timestampLabel.toolTip=tooltip; }
-- (void)setAvatar:(NSImage *)image { self.imageView.image=image ?: [NSImage imageNamed:NSImageNameUser]; }
+- (void)setAvatar:(NSImage *)image { self.imageView.image=image ?: (JMTheme()==JMThemeMac2011 ? JMRetroImage(@"avatar") : nil) ?: [NSImage imageNamed:NSImageNameUser]; }
 - (void)setBackgroundStyle:(NSBackgroundStyle)style {
     [super setBackgroundStyle:style]; BOOL selected=style==NSBackgroundStyleDark;
-    self.textField.textColor=selected ? [NSColor whiteColor] : [NSColor textColor];
+    self.textField.textColor=selected ? [NSColor whiteColor] : (JMTheme()==JMThemeQIP && [self.identifier isEqual:@"person"] ? [NSColor colorWithCalibratedRed:0.30 green:0.09 blue:0.72 alpha:1] : [NSColor textColor]);
     self.detailLabel.textColor=selected ? [NSColor whiteColor] : (self.draft ? [NSColor colorWithCalibratedRed:0.49 green:0.29 blue:0.10 alpha:1] : JMSecondaryTextColor());
     self.timestampLabel.textColor=selected ? [NSColor whiteColor] : JMSecondaryTextColor();
     self.badge.emphasized=selected; self.badge.needsDisplay=YES;
@@ -254,6 +286,8 @@ static void JMDrawControl(NSRect frame,BOOL pressed,BOOL focused,BOOL enabled,BO
     if (pressed) fill=pro ? [[NSGradient alloc] initWithStartingColor:JMColor(223,231,244) endingColor:JMColor(182,195,217)] : [[NSGradient alloc] initWithStartingColor:JMColor(242,243,237) endingColor:JMColor(220,224,211)];
     else if (pro) fill=JMProButtonGradient();
     else fill=[[NSGradient alloc] initWithColorsAndLocations:JMColor(243,242,240),0.0,JMColor(248,249,247),0.45,JMColor(254,255,253),0.90,JMColor(255,255,251),1.0,nil];
+    if (JMTheme()==JMThemeQIP) fill=[[NSGradient alloc] initWithStartingColor:pressed ? JMColor(197,216,235) : JMColor(230,228,211) endingColor:JMColor(255,255,253)];
+    if (JMTheme()==JMThemeJimm) fill=[[NSGradient alloc] initWithStartingColor:pressed ? JMColor(225,185,183) : JMColor(223,223,223) endingColor:JMColor(255,255,255)];
     if (!enabled) fill=[[NSGradient alloc] initWithStartingColor:JMColor(227,230,235) endingColor:JMColor(247,248,251)];
     [fill drawInBezierPath:[NSBezierPath bezierPathWithRoundedRect:inner xRadius:MAX(0,radius-1) yRadius:MAX(0,radius-1)] angle:flipped ? 270 : 90];
     if (!pro) { [[NSColor whiteColor] setStroke]; [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(outer,1.5,1.5) xRadius:0.5 yRadius:0.5] stroke]; }
@@ -266,17 +300,44 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
     [fill drawInBezierPath:[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(outer,1,1) xRadius:3 yRadius:3] angle:flipped ? 270 : 90];
     if (focused) { [NSGraphicsContext saveGraphicsState]; NSSetFocusRingStyle(NSFocusRingOnly); [edge fill]; [NSGraphicsContext restoreGraphicsState]; }
 }
+// The red Jimm theme uses a row of icon commands on a red footer.
+static void JMDrawJimmFooterItem(NSRect frame, NSView *view, NSImage *image, NSString *title, NSFont *font, BOOL enabled, BOOL highlighted, BOOL focused, BOOL menu) {
+    font=font ?: [NSFont boldSystemFontOfSize:11];
+    NSRect face=NSInsetRect(frame,1,1);
+    if (highlighted || focused) {
+        [[NSColor colorWithCalibratedWhite:1 alpha:highlighted ? 0.23 : 0.15] setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:face xRadius:4 yRadius:4] fill];
+    }
+    CGFloat iconY=view.isFlipped ? NSMinY(frame)+3 : NSMaxY(frame)-22;
+    NSRect icon=NSMakeRect(floor(NSMidX(frame)-9),iconY,18,18);
+    if (menu) {
+        [[NSColor colorWithCalibratedWhite:1 alpha:0.96] setFill];
+        [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(icon,-2,-2)] fill];
+    }
+    [image drawInRect:icon fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:enabled ? 1 : 0.45 respectFlipped:YES hints:nil];
+    NSMutableParagraphStyle *style=[[NSMutableParagraphStyle alloc] init];
+    style.alignment=NSCenterTextAlignment;
+    style.lineBreakMode=NSLineBreakByTruncatingTail;
+    CGFloat textY=view.isFlipped ? NSMinY(frame)+24 : NSMaxY(frame)-38;
+    NSRect label=NSMakeRect(NSMinX(frame)+4,textY,NSWidth(frame)-8,14);
+    [title drawInRect:label withAttributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:[NSColor colorWithCalibratedWhite:1 alpha:enabled ? 1 : 0.65],NSParagraphStyleAttributeName:style}];
+}
 @interface JMThemedButtonCell ()
 @property(nonatomic) BOOL hovered;
 @end
 @implementation JMThemedButtonCell
 - (void)drawBezelWithFrame:(NSRect)frame inView:(NSView *)view {
     if (JMTheme()==JMThemeCurrent) { [super drawBezelWithFrame:frame inView:view]; return; }
+    if (JMTheme()==JMThemeJimm && view.tag==JMRetroFooterItemTag) return;
     JMDrawControl(frame,self.isHighlighted || self.state==NSOnState,self.showsFirstResponder,self.isEnabled,view.isFlipped);
     if (self.hovered && self.isEnabled && view.window.isKeyWindow && !self.isHighlighted) { [(JMTheme()==JMThemePro2003 ? JMColor(80,115,175) : JMColor(72,132,42)) setStroke]; NSBezierPath *edge=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(frame,1.5,1.5) xRadius:JMTheme()==JMThemePro2003 ? 3 : 1 yRadius:JMTheme()==JMThemePro2003 ? 3 : 1]; [edge stroke]; }
 }
 - (void)drawInteriorWithFrame:(NSRect)frame inView:(NSView *)view {
     if (JMTheme()==JMThemeCurrent) { [super drawInteriorWithFrame:frame inView:view]; return; }
+    if (JMTheme()==JMThemeJimm && view.tag==JMRetroFooterItemTag) {
+        JMDrawJimmFooterItem(view.bounds,view,self.image,self.title,self.font,self.isEnabled,self.isHighlighted || self.hovered,self.showsFirstResponder,NO);
+        return;
+    }
     NSRect content=NSInsetRect(frame,6,1);
     NSFont *font=self.font ?: [NSFont systemFontOfSize:11];
     NSMutableParagraphStyle *style=[[NSMutableParagraphStyle alloc] init]; style.alignment=NSCenterTextAlignment; style.lineBreakMode=NSLineBreakByTruncatingTail;
@@ -284,9 +345,10 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
     if (self.image && self.imagePosition==NSImageOnly) { [self.image drawInRect:NSMakeRect(NSMidX(frame)-8,NSMidY(frame)-8,16,16) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:self.isEnabled ? 1 : 0.45 respectFlipped:YES hints:nil]; return; }
     CGFloat textWidth=[self.title sizeWithAttributes:@{NSFontAttributeName:font}].width;
     if (self.image && self.imagePosition!=NSNoImage) {
-        CGFloat x=NSMidX(frame)-(MIN(textWidth,NSWidth(content)-22)+21)/2;
+        CGFloat labelWidth=MIN(ceil(textWidth)+1,MAX(0,NSWidth(content)-21));
+        CGFloat x=floor(NSMidX(frame)-(labelWidth+21)/2);
         [self.image drawInRect:NSMakeRect(x,NSMidY(frame)-8,16,16) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:self.isEnabled ? 1 : 0.45 respectFlipped:YES hints:nil];
-        content.origin.x=x+21; content.size.width=NSMaxX(frame)-6-content.origin.x;
+        content.origin.x=x+21; content.size.width=labelWidth;
     }
     NSSize size=[self.title sizeWithAttributes:@{NSFontAttributeName:font}];
     content.origin.y=NSMidY(frame)-ceil(size.height)/2+(self.isHighlighted ? (view.isFlipped ? 1 : -1) : 0); content.size.height=ceil(size.height);
@@ -314,6 +376,11 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
         NSMenuItem *item=self.selectedItem; [item.image drawInRect:NSMakeRect(NSMinX(frame)+1,NSMidY(frame)-8,16,16) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:self.isEnabled ? 1 : 0.5 respectFlipped:YES hints:nil];
         NSBezierPath *arrow=[NSBezierPath bezierPath]; CGFloat x=NSMaxX(frame)-5,y=NSMidY(frame); [arrow moveToPoint:NSMakePoint(x-2,y+2)]; [arrow lineToPoint:NSMakePoint(x+2,y+2)]; [arrow lineToPoint:NSMakePoint(x,y-1)]; [arrow closePath]; [JMColor(31,66,24) setFill]; [arrow fill];
         if (self.showsFirstResponder || self.isHighlighted) { [JMColor(244,253,237) setStroke]; [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(frame,0.5,0.5) xRadius:2 yRadius:2] stroke]; } return;
+    }
+    if (JMTheme()==JMThemeJimm && view.tag==JMRetroFooterItemTag) {
+        NSMenuItem *item=self.itemArray.firstObject;
+        JMDrawJimmFooterItem(frame,view,item.image,item.title,self.font,self.isEnabled,self.isHighlighted,self.showsFirstResponder,YES);
+        return;
     }
     JMDrawControl(frame,self.isHighlighted,self.showsFirstResponder,self.isEnabled,view.isFlipped);
     if (JMTheme()==JMThemeMac2011 && view.tag==902) { [JMColor(84,96,77) setFill]; for (NSInteger i=0;i<3;i++) NSRectFill(NSMakeRect(NSMinX(frame)+5,NSMidY(frame)-3+i*3,9,1)); return; }
@@ -354,6 +421,7 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
 @end
 @implementation JMConversationChrome
 - (void)drawRect:(NSRect)dirtyRect {
+    if (JMThemeIsMobile()) { [super drawRect:dirtyRect]; return; }
     if (JMTheme()==JMThemeMac2011) {
         [JMColor(233,233,225) setFill]; NSRectFill(self.bounds);
         NSRect top=NSMakeRect(0,NSHeight(self.bounds)-31,NSWidth(self.bounds),31); [JMColor(247,248,242) setFill]; NSRectFill(top);
@@ -369,7 +437,7 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
 @end
 @implementation JMRosterChrome
 - (void)drawRect:(NSRect)dirtyRect {
-    if (JMTheme()==JMThemeCurrent) { [super drawRect:dirtyRect]; return; }
+    if (JMTheme()==JMThemeCurrent || JMThemeIsMobile()) { [super drawRect:dirtyRect]; return; }
     BOOL mac=JMTheme()==JMThemeMac2011; [JMThemeBackground() setFill]; NSRectFill(self.bounds);
     if (mac) {
         NSRect profile=NSMakeRect(0,28,NSWidth(self.bounds),NSHeight(self.bounds)-50);
@@ -378,37 +446,43 @@ static void JMDrawMacConversationTab(NSRect frame,BOOL selected,BOOL focused,BOO
         NSBezierPath *pointer=[NSBezierPath bezierPath]; [pointer moveToPoint:NSMakePoint(66,NSMidY(status)-4)]; [pointer lineToPoint:NSMakePoint(60,NSMidY(status))]; [pointer lineToPoint:NSMakePoint(66,NSMidY(status)+4)]; [pointer closePath]; [pointer fill];
         NSRect brand=NSMakeRect(0,NSHeight(self.bounds)-22,NSWidth(self.bounds),22);
         [[[NSGradient alloc] initWithStartingColor:JMColor(205,212,199) endingColor:JMColor(249,251,245)] drawInRect:brand angle:90];
-        [JMFlowerImage() drawInRect:NSMakeRect(7,NSHeight(self.bounds)-20,16,16) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1 respectFlipped:NO hints:nil];
-    } else [[[NSGradient alloc] initWithStartingColor:JMColor(207,214,230) endingColor:JMColor(247,249,254)] drawInRect:self.bounds angle:90];
+        [(JMRetroImage(@"brand") ?: JMFlowerImage()) drawInRect:NSMakeRect(7,NSHeight(self.bounds)-20,16,16) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1 respectFlipped:NO hints:nil];
+    } else {
+        [[[NSGradient alloc] initWithStartingColor:JMColor(207,214,230) endingColor:JMColor(247,249,254)] drawInRect:self.bounds angle:90];
+        NSRect strip=NSMakeRect(0,NSHeight(self.bounds)-23,NSWidth(self.bounds),23);
+        [[[NSGradient alloc] initWithColorsAndLocations:JMColor(37,75,135),0.0,JMColor(58,103,165),0.43,JMColor(104,151,209),0.82,JMColor(157,190,226),1.0,nil] drawInRect:strip angle:90];
+        [JMColor(42,79,135) setFill]; NSRectFill(NSMakeRect(0,NSMinY(strip),NSWidth(strip),1));
+    }
     [JMColor(151,159,170) setFill]; NSRectFill(NSMakeRect(0,0,NSWidth(self.bounds),1));
 }
 @end
-NSImage *JMClassicToolbarImage(NSString *name) {
-    static NSMutableDictionary *icons; if (!icons) icons=[NSMutableDictionary dictionary]; if (icons[name]) return icons[name];
-    NSImage *image=[[NSImage alloc] initWithSize:NSMakeSize(18,18)]; [image lockFocus];
-    if ([name isEqual:@"contacts"]) {
-        NSArray *colors=@[JMColor(214,66,43),JMColor(91,154,40),JMColor(222,166,27)];
-        for (NSUInteger i=0;i<3;i++) { CGFloat x=2+i*5,y=i==1 ? 1 : 3; [colors[i] setFill]; [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(x,y,6,7) xRadius:2 yRadius:2] fill]; [JMColor(250,208,142) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(x+1,y+7,5,5)] fill]; }
-    } else if ([name isEqual:@"conversations"]) {
-        [JMColor(74,157,39) setFill]; [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(1,6,13,10) xRadius:3 yRadius:3] fill];
-        NSBezierPath *tail=[NSBezierPath bezierPath]; [tail moveToPoint:NSMakePoint(3,7)]; [tail lineToPoint:NSMakePoint(3,3)]; [tail lineToPoint:NSMakePoint(8,7)]; [tail closePath]; [tail fill];
-        [JMColor(83,146,195) setFill]; [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(7,1,10,9) xRadius:2 yRadius:2] fill];
-        [[NSColor whiteColor] setFill]; for (NSInteger x=9;x<=15;x+=3) NSRectFill(NSMakeRect(x,5,1,1));
-    } else if ([name isEqual:@"favorites"]) {
-        [JMColor(107,113,111) setFill]; NSRectFill(NSMakeRect(4,1,2,15));
-        NSBezierPath *flag=[NSBezierPath bezierPath]; [flag moveToPoint:NSMakePoint(6,15)]; [flag curveToPoint:NSMakePoint(17,13) controlPoint1:NSMakePoint(11,18) controlPoint2:NSMakePoint(13,10)]; [flag lineToPoint:NSMakePoint(16,7)]; [flag curveToPoint:NSMakePoint(6,9) controlPoint1:NSMakePoint(12,5) controlPoint2:NSMakePoint(10,12)]; [flag closePath]; [JMColor(61,144,189) setFill]; [flag fill];
-    } else if ([name isEqual:@"historyPage"]) {
-        NSBezierPath *page=[NSBezierPath bezierPath]; [page moveToPoint:NSMakePoint(2,1)]; [page lineToPoint:NSMakePoint(2,17)]; [page lineToPoint:NSMakePoint(12,17)]; [page lineToPoint:NSMakePoint(16,13)]; [page lineToPoint:NSMakePoint(16,1)]; [page closePath]; [JMColor(255,244,160) setFill]; [page fill]; [JMColor(118,119,40) setStroke]; [page stroke];
-        [@"H" drawAtPoint:NSMakePoint(4,3) withAttributes:@{NSFontAttributeName:[NSFont boldSystemFontOfSize:10],NSForegroundColorAttributeName:JMColor(42,46,20)}];
-    } else if ([name isEqual:@"history"]) {
-        [JMColor(100,132,50) setFill]; [[NSBezierPath bezierPathWithRoundedRect:NSMakeRect(1,1,16,16) xRadius:2 yRadius:2] fill];
-        [@"H" drawAtPoint:NSMakePoint(4,1) withAttributes:@{NSFontAttributeName:[NSFont boldSystemFontOfSize:14],NSForegroundColorAttributeName:JMColor(248,246,210)}];
-    } else {
-        [JMColor(154,140,83) setStroke]; [JMColor(252,239,185) setFill]; NSBezierPath *card=[NSBezierPath bezierPathWithRect:NSMakeRect(1.5,3.5,15,11)]; [card fill]; [card stroke];
-        [JMColor(219,149,96) setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(4,9,4,4)] fill]; [JMColor(93,149,170) setFill]; NSRectFill(NSMakeRect(3,5,6,4)); [JMColor(149,143,102) setFill]; NSRectFill(NSMakeRect(11,10,4,1)); NSRectFill(NSMakeRect(11,7,4,1));
-    }
-    [image unlockFocus]; icons[name]=image; return image;
+NSURL *JMRetroResourceURL(NSString *name, NSString *extension, NSString *pack) {
+    NSString *directory=[@"Retro" stringByAppendingPathComponent:pack];
+    NSURL *url=[[NSBundle mainBundle] URLForResource:name withExtension:extension subdirectory:directory];
+    if (url) return url;
+    NSString *root=[[[NSBundle mainBundle] executablePath] stringByDeletingLastPathComponent];
+    NSString *relative=[NSString stringWithFormat:@"../Resources/%@/%@.%@",directory,name,extension];
+    NSString *path=[root stringByAppendingPathComponent:relative];
+    return [[NSFileManager defaultManager] fileExistsAtPath:path] ? [NSURL fileURLWithPath:path] : nil;
 }
+
+NSImage *JMRetroImage(NSString *name) {
+    static NSMutableDictionary *cache;
+    if (!cache) cache=[NSMutableDictionary dictionary];
+    NSString *theme=JMThemeIdentifier();
+    NSString *key=[NSString stringWithFormat:@"%@/%@",theme,name];
+    id cached=cache[key];
+    if (cached) return cached==[NSNull null] ? nil : cached;
+    NSImage *image=nil;
+    for (NSString *pack in [theme isEqual:@"jimm"] ? @[@"jimm"] : @[theme,@"jimm"]) {
+        NSURL *url=JMRetroResourceURL(name,@"png",pack);
+        if (url) image=[[NSImage alloc] initWithContentsOfURL:url];
+        if (image) break;
+    }
+    cache[key]=image ?: (id)[NSNull null];
+    return image;
+}
+
 @interface JMThemedSearchCell : NSSearchFieldCell
 @end
 @implementation JMThemedSearchCell
@@ -448,7 +522,11 @@ static char JMUtilityHeaderKey, JMUtilityFontKey;
 - (void)drawRect:(NSRect)rect {
     self.topColor=JMLegacyHeaderTopColor(); self.bottomColor=JMLegacyHeaderBottomColor(); [super drawRect:rect];
     [JMFlowerImage() drawInRect:NSMakeRect(16,10,24,24) fromRect:NSZeroRect operation:NSCompositeSourceOver fraction:1];
-    [self.caption drawInRect:NSMakeRect(50,12,MAX(0,self.bounds.size.width-66),24) withAttributes:@{NSFontAttributeName:JMThemeFont([NSFont boldSystemFontOfSize:16],@""),NSForegroundColorAttributeName:[NSColor colorWithCalibratedWhite:0.12 alpha:1]}];
+    NSMutableParagraphStyle *style=[[NSMutableParagraphStyle alloc] init];
+    style.alignment=JMTheme()==JMThemeJimm ? NSCenterTextAlignment : NSLeftTextAlignment;
+    style.lineBreakMode=NSLineBreakByTruncatingTail;
+    CGFloat inset=JMTheme()==JMThemeJimm ? 50 : 16;
+    [self.caption drawInRect:NSMakeRect(50,12,MAX(0,self.bounds.size.width-50-inset),24) withAttributes:@{NSFontAttributeName:JMThemeFont([NSFont boldSystemFontOfSize:16],@""),NSForegroundColorAttributeName:JMThemeHeaderInk(),NSParagraphStyleAttributeName:style}];
 }
 @end
 static void JMRefreshUtilityView(NSView *view) {

@@ -42,8 +42,8 @@ NSDictionary *JMSafePreferences(NSDictionary *preferences) {
         if ([key isEqual:@"ChatFontFamily"]) { if ([value isKindOfClass:[NSString class]] && [value length]<=256) safe[key]=value; }
         else if ([key isEqual:@"AutoAwayMinutes"]) { if ([value isKindOfClass:[NSNumber class]] && [@[@0,@5,@10,@15,@30,@60] containsObject:value]) safe[key]=value; }
         else if ([key isEqual:@"ChatFontSize"]) { if ([value isKindOfClass:[NSNumber class]] && isfinite([value doubleValue]) && [value doubleValue]>=9 && [value doubleValue]<=28) safe[key]=value; }
-        else if ([key isEqual:@"InterfaceLanguage"]) { if ([@[@"ru",@"en"] containsObject:value]) safe[key]=value; }
-        else if ([key isEqual:@"InterfaceAppearance"]) { if ([@[@"current",@"mac2011",@"pro2003"] containsObject:value]) safe[key]=value; }
+        else if ([key isEqual:@"InterfaceLanguage"]) { if ([@[@"ru",@"en",@"uk",@"be"] containsObject:value]) safe[key]=value; }
+        else if ([key isEqual:@"InterfaceAppearance"]) { if ([@[@"current",@"mac2011",@"pro2003",@"qip",@"jimm"] containsObject:value]) safe[key]=value; }
         else if ([key isEqual:@"NotificationContentStyle"]) { if ([@[@"sender",@"preview",@"private"] containsObject:value]) safe[key]=value; }
         else if ([value isKindOfClass:[NSNumber class]]) safe[key]=@([value boolValue]);
     }

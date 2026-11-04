@@ -22,6 +22,7 @@
 - (BOOL)deleteMessagesForPeer:(NSString *)peer from:(NSDate *)from until:(NSDate *)until backupURL:(NSURL *)url manifest:(NSDictionary *)manifest error:(NSError **)error;
 - (BOOL)appendMessage:(NSDictionary *)message error:(NSError **)error;
 - (BOOL)appendMessage:(NSDictionary *)message unread:(BOOL)unread error:(NSError **)error;
+- (BOOL)appendMessage:(NSDictionary *)message unread:(BOOL)unread inserted:(BOOL *)inserted error:(NSError **)error;
 - (NSDictionary *)unreadCounts;
 - (NSString *)firstUnreadIDForPeer:(NSString *)peer;
 - (BOOL)markReadPeer:(NSString *)peer error:(NSError **)error;

@@ -55,7 +55,7 @@
     // UIN, token, session ID, messages or NSError's userInfo.
     [self.diagnosticEntries addObject:@{@"endpoint":path, @"http":@(http), @"api":@(api),
         @"errorDomain":error.domain ?: @"", @"errorCode":@(error.code),
-        @"version":@"0.15.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
+        @"version":@"0.16.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
     self.diagnosticEntries=[JMSafeDiagnosticEntries(self.diagnosticEntries) mutableCopy];
     NSDictionary *latest=self.diagnosticEntries.lastObject; if (error || http>=400 || api>=400) self.lastDiagnosticFailure=latest;
     if ([self.diagnosticEntries count] > 20) [self.diagnosticEntries removeObjectAtIndex:0];
@@ -137,7 +137,7 @@
     NSUInteger attempt = ++self.sessionSerial;
     [self status:JML(@"Подключаемся к Jimm.online…") connected:NO];
     [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,sessionEnded,rateLimit",
-                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.15.0", @"timeout":@"60"}
+                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.16.0", @"timeout":@"60"}
            timeout:30 completion:^(NSDictionary *data, NSError *error) {
         if (attempt != self.sessionSerial) return;
         if (error) {
@@ -297,6 +297,45 @@
 - (BOOL)requireSession:(void (^)(NSDictionary *, NSError *))completion {
     if (self.connected && [self.sessionID length]) return YES;
     completion(nil, [NSError errorWithDomain:JMAPIErrorDomain code:-2 userInfo:@{NSLocalizedDescriptionKey:JML(@"Нет соединения. Нажмите «Подключиться» и повторите попытку.")}]); return NO;
+}
+- (void)sessionQuery:(NSString *)path parameters:(NSDictionary *)parameters completion:(void (^)(NSDictionary *, NSError *))completion {
+    if (![self requireSession:completion]) return;
+    NSString *sid=[self.sessionID copy];
+    NSMutableDictionary *form=[parameters mutableCopy];
+    form[@"aimsid"]=sid;
+    [self call:path parameters:form timeout:20 completion:^(NSDictionary *data, NSError *error) {
+        if (![sid isEqualToString:self.sessionID]) {
+            completion(nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
+            return;
+        }
+        completion(data,error);
+    }];
+}
+- (void)fetchPrivacy:(void (^)(NSDictionary *, NSError *))completion {
+    [self sessionQuery:@"/preference/getPermitDeny" parameters:@{} completion:^(NSDictionary *data, NSError *error) {
+        if (!error && (![@[@"permitAll",@"denySome",@"permitSome",@"permitOnList",@"denyAll"] containsObject:JMString(data[@"pdMode"])] || !JMBlockedUINs(data))) {
+            error=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер вернул неизвестные настройки приватности.")}];
+        }
+        completion(error ? nil : data,error);
+    }];
+}
+- (void)setBlocked:(BOOL)blocked peer:(NSString *)peer enableDenyMode:(BOOL)enableMode completion:(void (^)(NSDictionary *, NSError *))completion {
+    if (!JMValidUIN(peer) || [peer isEqualToString:self.uin]) { [self invalidRosterInput:completion]; return; }
+    NSMutableDictionary *parameters=[@{(blocked ? @"pdBlock" : @"pdBlockRemove"):peer} mutableCopy];
+    if (blocked && enableMode) parameters[@"pdMode"]=@"denySome";
+    [self sessionQuery:@"/preference/setPermitDeny" parameters:parameters completion:^(NSDictionary *data, NSError *error) {
+        if (error) { completion(nil,error); return; }
+        [self fetchPrivacy:^(NSDictionary *privacy, NSError *readError) {
+            if (!readError && ([JMBlockedUINs(privacy) containsObject:peer]!=blocked || (blocked && ![privacy[@"pdMode"] isEqual:@"denySome"]))) {
+                readError=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер не подтвердил изменение списка блокировки.")}];
+            }
+            completion(privacy,readError);
+        }];
+    }];
+}
+- (void)fetchStoredMessagesForPeer:(NSString *)peer completion:(void (^)(NSDictionary *, NSError *))completion {
+    if (!JMValidUIN(peer)) { [self invalidRosterInput:completion]; return; }
+    [self sessionQuery:@"/imlog/fetchStoredIMs" parameters:@{@"to":peer,@"nToGet":@200,@"sortOrder":@"desc"} completion:completion];
 }
 - (void)fetchPresenceForUIN:(NSString *)uin completion:(void (^)(NSDictionary *, NSError *))completion {
     if (![self requireSession:completion]) return;

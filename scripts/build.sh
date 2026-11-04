@@ -17,6 +17,8 @@ cp "$PROJECT_ROOT/Resources/ICQFlower.png" "$PROJECT_ROOT/Resources/JimmMac.icns
 cp "$PROJECT_ROOT/Resources/SectigoPublicServerAuthenticationRootE46.der" "$PROJECT_ROOT/Resources/USERTrustECCCertificationAuthority.der" "$APP/Contents/Resources/"
 cp "$PROJECT_ROOT/Resources/JimmStatusSprite.png" "$APP/Contents/Resources/"
 mkdir -p "$APP/Contents/Resources/Sounds"
+ditto "$PROJECT_ROOT/Resources/Retro" "$APP/Contents/Resources/Retro"
+cp "$PROJECT_ROOT/Resources/ASSET-SOURCES.md" "$APP/Contents/Resources/Retro/SOURCES.md"
 cp "$PROJECT_ROOT/Resources/Sounds/"*.mp3 "$APP/Contents/Resources/Sounds/"
 plutil -lint "$APP/Contents/Info.plist"
 # Launch Services uses the bundle's modification time to notice updated icons.

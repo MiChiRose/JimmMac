@@ -9,6 +9,8 @@
 @end
 @interface JMContactTable : NSTableView
 @property(nonatomic) SEL activateAction;
+@property(nonatomic) BOOL blueRosterGradient;
+@property(nonatomic, copy) BOOL (^handleHeaderClick)(NSInteger row, CGFloat offset);
 @end
 @interface JMFormTextView : NSTextView
 @end

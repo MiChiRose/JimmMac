@@ -12,3 +12,6 @@ NSDictionary *JMDecodeResponse(NSData *data, NSURLResponse *response, NSError **
 NSString *JMPlainText(NSString *text, BOOL html);
 NSArray *JMContactsFromBuddyList(NSDictionary *buddyList);
 NSDictionary *JMMessageFromEvent(NSDictionary *event, NSString *ownUIN);
+
+NSDictionary *JMMessageFromStoredIM(NSDictionary *row, NSString *peer, NSString *ownUIN);
+NSArray *JMBlockedUINs(NSDictionary *privacy);

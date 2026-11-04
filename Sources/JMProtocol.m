@@ -1,5 +1,6 @@
 #import "JMLocalization.h"
 #import "JMProtocol.h"
+#import <math.h>
 
 NSString * const JMAPIErrorDomain = @"online.jimm.mavericks.api";
 NSString *JMString(id value) {
@@ -41,7 +42,7 @@ NSMutableURLRequest *JMRequest(NSURL *baseURL, NSString *path, NSDictionary *par
     NSMutableDictionary *form = [parameters mutableCopy];
     form[@"f"] = @"json";
     // Keep the explicit GET-only contract. Login and message bodies use POST.
-    BOOL getOnly = [@[@"/auth/getInfo", @"/aim/fetchEvents", @"/aim/endSession", @"/buddylist/addBuddy", @"/buddylist/removeBuddy", @"/buddylist/moveBuddy", @"/buddylist/setBuddyAttribute", @"/buddylist/addGroup", @"/buddylist/renameGroup", @"/buddylist/removeGroup", @"/presence/get", @"/presence/getProfile", @"/presence/setProfile", @"/presence/setStatus", @"/memberDir/get", @"/memberDir/update", @"/presence/setState", @"/im/setTyping"] containsObject:path];
+    BOOL getOnly = [@[@"/auth/getInfo", @"/aim/fetchEvents", @"/aim/endSession", @"/buddylist/addBuddy", @"/buddylist/removeBuddy", @"/buddylist/moveBuddy", @"/buddylist/setBuddyAttribute", @"/buddylist/addGroup", @"/buddylist/renameGroup", @"/buddylist/removeGroup", @"/presence/get", @"/presence/getProfile", @"/presence/setProfile", @"/presence/setStatus", @"/memberDir/get", @"/memberDir/update", @"/presence/setState", @"/im/setTyping", @"/imlog/fetchStoredIMs", @"/preference/getPermitDeny", @"/preference/setPermitDeny"] containsObject:path];
     if (getOnly) url = [url stringByAppendingFormat:@"?%@", JMFormEncode(form)];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]
                                                          cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
@@ -131,4 +132,29 @@ NSDictionary *JMMessageFromEvent(NSDictionary *event, NSString *ownUIN) {
     return @{@"peer":peer, @"outgoing":@(outgoing), @"text":JMPlainText(text, html), @"id":msgID,
              @"timestamp":@(ts > 0 ? ts : [[NSDate date] timeIntervalSince1970]),
              @"name":JMString(source[@"friendly"] ?: data[@"friendly"])};
+}
+
+NSDictionary *JMMessageFromStoredIM(NSDictionary *row, NSString *peer, NSString *ownUIN) {
+    NSString *sender=JMString(row[@"sender"]), *identifier=JMString(row[@"msgId"]);
+    NSString *text=[row[@"message"] isKindOfClass:[NSString class]] ? row[@"message"] : nil;
+    NSTimeInterval timestamp=[JMString(row[@"date"]) doubleValue];
+    if (!JMValidUIN(peer) || !JMValidUIN(ownUIN) || !identifier.length || !text ||
+        (![sender isEqualToString:peer] && ![sender isEqualToString:ownUIN]) ||
+        !isfinite(timestamp) || timestamp<=0) return nil;
+    BOOL html=[JMString(row[@"imf"]) isEqual:@"html"] || [text rangeOfString:@"<HTML" options:NSCaseInsensitiveSearch].location!=NSNotFound;
+    return @{@"peer":peer, @"id":identifier, @"timestamp":@(timestamp), @"text":JMPlainText(text,html),
+             @"outgoing":@([sender isEqualToString:ownUIN]), @"name":@""};
+}
+
+NSArray *JMBlockedUINs(NSDictionary *privacy) {
+    id raw=privacy[@"blocks"];
+    if (!raw) raw=privacy[@"denies"];
+    if (raw && ![raw isKindOfClass:[NSArray class]]) return nil;
+    NSMutableOrderedSet *result=[NSMutableOrderedSet orderedSet];
+    for (id entry in JMArray(raw)) {
+        NSString *uin=JMString([entry isKindOfClass:[NSDictionary class]] ? entry[@"aimId"] : entry);
+        if (!JMValidUIN(uin)) return nil;
+        [result addObject:uin];
+    }
+    return result.array;
 }

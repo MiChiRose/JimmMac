@@ -21,6 +21,7 @@ NSColor *JMLegacyHeaderBottomColor(void);
 @end
 @interface JMListCell : NSTableCellView
 @property(nonatomic,copy) NSString *groupTitle;
+@property(nonatomic) BOOL groupOnly;
 - (CGFloat)groupHeaderHeight;
 - (void)configureName:(NSString *)name detail:(NSString *)detail state:(NSString *)state unread:(NSInteger)unread;
 - (void)setAvatar:(NSImage *)image;
@@ -28,6 +29,7 @@ NSColor *JMLegacyHeaderBottomColor(void);
 - (void)setTimestampTooltip:(NSString *)tooltip;
 @end
 // Rendering stays in native AppKit cells: tracking, menus, focus and accessibility remain native.
+enum { JMRetroFooterItemTag = 906 };
 @interface JMThemedButton : NSButton
 @end
 @interface JMThemedButtonCell : NSButtonCell
@@ -40,7 +42,8 @@ NSColor *JMLegacyHeaderBottomColor(void);
 @end
 @interface JMRosterChrome : JMChromeView
 @end
-NSImage *JMClassicToolbarImage(NSString *name);
+NSURL *JMRetroResourceURL(NSString *name, NSString *extension, NSString *pack);
+NSImage *JMRetroImage(NSString *name);
 @interface JMThemedSearchField : NSSearchField
 @end
 @interface JMClassicSendBar : NSView

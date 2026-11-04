@@ -65,6 +65,9 @@ static NSString *JMState(NSDictionary *contact) {
 }
 
 @interface JMAppDelegate () <JMAvatarStoreDelegate, NSMenuDelegate, JMNotificationAlertsDelegate>
+@property(nonatomic) BOOL changingPrivacy;
+@property(nonatomic) BOOL restoringMessages;
+@property(nonatomic) BOOL restoreAfterReconnect;
 @property(nonatomic,strong) JMAutoAway *autoAway;
 @property(nonatomic,strong) NSTimer *autoAwayTimer;
 @property(nonatomic,strong) NSDate *autoAwayRetryDate;
@@ -91,6 +94,11 @@ static NSString *JMState(NSDictionary *contact) {
 @property(nonatomic,strong) NSView *themeSendBar;
 @property(nonatomic,strong) NSMenu *themeGroupMenu;
 @property(nonatomic,strong) NSPopUpButton *themeMainMenu;
+@property(nonatomic,strong) JMChromeView *mobileFooter;
+@property(nonatomic,strong) NSButton *mobileFind;
+@property(nonatomic,strong) NSButton *mobileSettings;
+@property(nonatomic,strong) NSButton *mobileUnread;
+@property(nonatomic,strong) NSTextField *mobileChatTitle;
 @property(nonatomic,strong) NSSegmentedControl *themeConversationTabs;
 @property(nonatomic,strong) NSPopUpButton *themeConversationPicker;
 @property(nonatomic,strong) NSArray *themeTabPeers;
@@ -110,6 +118,13 @@ static NSString *JMState(NSDictionary *contact) {
 @property(nonatomic, strong) JMAPIClient *client;
 @property(nonatomic, strong) JMUpdateChecker *updateChecker;
 @property(nonatomic) BOOL checkingUpdates;
+@property(nonatomic) BOOL manualUpdateRequested;
+@property(nonatomic,strong) NSWindow *updateWindow;
+@property(nonatomic,strong) NSTextField *updateHeading;
+@property(nonatomic,strong) NSTextView *updateDetail;
+@property(nonatomic,strong) NSProgressIndicator *updateProgress;
+@property(nonatomic,strong) NSButton *updateAction;
+@property(nonatomic,strong) NSURL *updateReleaseURL;
 @property(nonatomic,strong) NSTimer *updateTimer;
 @property(nonatomic,strong) NSDate *updateRetryDate;
 @property(nonatomic,strong) NSDictionary *pendingUpdateRelease;
@@ -274,6 +289,8 @@ static NSString *JMState(NSDictionary *contact) {
 @property(nonatomic, strong) NSMutableDictionary *drafts;
 @property(nonatomic, strong) NSMutableDictionary *unread;
 @property(nonatomic, strong) NSArray *visibleContacts;
+@property(nonatomic) BOOL unreadOnly;
+@property(nonatomic,strong) NSDictionary *visibleGroupCounts;
 @property(nonatomic, copy) NSString *selectedPeer;
 @property(nonatomic, copy) NSString *accountUIN;
 @property(nonatomic) BOOL sending;
@@ -315,7 +332,12 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)changeClassicFontSize:(NSMenuItem *)sender { CGFloat size=[sender.representedObject doubleValue]; if (size<9 || size>28) return; [self.chatPreferences setFamily:self.chatPreferences.family size:size]; [self applyChatFont]; }
 - (void)showClassicSmileys:(id)sender {
     NSMenu *menu=[[NSMenu alloc] initWithTitle:JML(@"Смайлики")];
-    for (NSString *smiley in @[@":)",@":(",@";)"]) { NSMenuItem *item=[menu addItemWithTitle:smiley action:@selector(insertClassicSmiley:) keyEquivalent:@""]; item.target=self; item.representedObject=smiley; }
+    for (NSString *code in JMSmileyCodes()) {
+        NSImage *image=JMSmileyImage(code);
+        if (!image) continue;
+        NSMenuItem *item=[menu addItemWithTitle:code action:@selector(insertClassicSmiley:) keyEquivalent:@""];
+        item.target=self; item.representedObject=code; item.image=image;
+    }
     [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0,NSHeight(self.themeSmileyButton.bounds)) inView:self.themeSmileyButton];
 }
 - (void)insertClassicSmiley:(NSMenuItem *)sender {
@@ -324,20 +346,52 @@ static NSString *JMState(NSDictionary *contact) {
     [self.composer insertText:sender.representedObject replacementRange:self.composer.selectedRange]; [self.composer didChangeText];
 }
 - (NSString *)historicalGroupForContact:(NSDictionary *)contact {
+    if (contact[@"_collapsedGroup"]) return contact[@"_collapsedGroup"];
     if (self.sectionControl.selectedSegment==1) return JML(@"Переписки");
     if ([self.favoritePeers containsObject:contact[@"aimId"]]) return JML(@"Избранные");
     if (JMTheme()==JMThemePro2003) return [JMString(contact[@"state"]) isEqual:@"offline"] || !JMString(contact[@"state"]).length ? JML(@"Не в сети") : JML(@"В сети");
     return self.selectedGroup ?: [JMArray(contact[@"groups"]) firstObject] ?: JML(@"Контакты");
 }
+- (NSString *)collapsedGroupsKey {
+    return [NSString stringWithFormat:@"CollapsedGroups.%@.%@",self.accountUIN ?: @"",JMThemeIdentifier()];
+}
+- (void)toggleGroup:(NSString *)group {
+    if (!group.length || self.sectionControl.selectedSegment!=0 || self.searchField.stringValue.length) return;
+    NSString *key=[self collapsedGroupsKey];
+    NSMutableSet *collapsed=[NSMutableSet setWithArray:[self.loginDefaults arrayForKey:key] ?: @[]];
+    if ([collapsed containsObject:group]) [collapsed removeObject:group]; else [collapsed addObject:group];
+    [self.loginDefaults setObject:collapsed.allObjects forKey:key]; [self reloadContacts];
+}
+- (void)toggleSelectedGroup:(id)sender {
+    NSInteger row=self.contactTable.selectedRow;
+    if (row>=0 && row<(NSInteger)self.visibleContacts.count) [self toggleGroup:[self historicalGroupForContact:self.visibleContacts[(NSUInteger)row]]];
+}
+- (void)toggleUnreadFilter:(id)sender {
+    self.unreadOnly=!(self.unreadOnly && self.sectionControl.selectedSegment==1);
+    if (self.sectionControl.selectedSegment!=1) { self.sectionControl.selectedSegment=1; [self changeSection:nil]; }
+    else [self reloadContacts];
+    [[self listWindow] makeKeyAndOrderFront:nil];
+}
 - (NSString *)historicalHeaderForRow:(NSInteger)row {
-    if (JMTheme()==JMThemeCurrent || row<0 || row>=(NSInteger)self.visibleContacts.count) return nil;
-    NSString *group=[self historicalGroupForContact:self.visibleContacts[(NSUInteger)row]];
-    return row==0 || ![group isEqual:[self historicalGroupForContact:self.visibleContacts[(NSUInteger)row-1]]] ? group : nil;
+    if (row<0 || row>=(NSInteger)self.visibleContacts.count) return nil;
+    BOOL conversations=self.sectionControl.selectedSegment==1;
+    if (conversations && JMTheme()==JMThemeCurrent) return nil;
+    NSDictionary *contact=self.visibleContacts[(NSUInteger)row];
+    NSString *group=[self historicalGroupForContact:contact];
+    if (row>0 && [group isEqual:[self historicalGroupForContact:self.visibleContacts[(NSUInteger)row-1]]]) return nil;
+    if (conversations) return group;
+    return [NSString stringWithFormat:@"%@ %@  %@",contact[@"_collapsedGroup"] ? @"▸" : @"▾",group,self.visibleGroupCounts[group] ?: @""];
+}
+- (CGFloat)headerHeightForRow:(NSInteger)row {
+    return [self historicalHeaderForRow:row].length ? (JMTheme()==JMThemePro2003 ? 17 : 23) : 0;
 }
 - (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row {
-    if (tableView!=self.contactTable || JMTheme()==JMThemeCurrent) return tableView.rowHeight;
+    if (tableView!=self.contactTable) return tableView.rowHeight;
+    CGFloat header=[self headerHeightForRow:row];
+    if (row>=0 && row<(NSInteger)self.visibleContacts.count && self.visibleContacts[(NSUInteger)row][@"_collapsedGroup"]) return header;
+    if (JMTheme()==JMThemeCurrent || JMThemeIsMobile()) return tableView.rowHeight+header;
     BOOL detail=self.sectionControl.selectedSegment==1 || (row>=0 && row<(NSInteger)self.visibleContacts.count && JMString(self.visibleContacts[(NSUInteger)row][@"statusMsg"]).length);
-    return (JMTheme()==JMThemePro2003 ? 18 : ([self.loginDefaults boolForKey:@"CompactContactList"] ? 28 : (detail ? 42 : 34)))+([self historicalHeaderForRow:row].length ? (JMTheme()==JMThemePro2003 ? 17 : 21) : 0);
+    return (JMTheme()==JMThemePro2003 ? 18 : ([self.loginDefaults boolForKey:@"CompactContactList"] ? 28 : (detail ? 42 : 34)))+header;
 }
 - (NSWindow *)listWindow { return JMTheme()==JMThemeCurrent ? self.chatWindow : self.rosterWindow; }
 - (void)showSessionWindows {
@@ -345,14 +399,14 @@ static NSString *JMState(NSDictionary *contact) {
     else { [self.rosterWindow makeKeyAndOrderFront:nil]; if (self.selectedPeer.length) [self.chatWindow orderFront:nil]; }
 }
 - (void)changeLanguage:(NSMenuItem *)sender {
-    NSString *language=sender.representedObject; if (![@[@"ru",@"en"] containsObject:language] || self.dataOperationInProgress) return;
+    NSString *language=sender.representedObject; if (![@[@"ru",@"en",@"uk",@"be"] containsObject:language] || self.dataOperationInProgress) return;
     [self.loginDefaults setObject:language forKey:@"InterfaceLanguage"]; [self.loginDefaults synchronize];
     [self showError:JML(@"Язык сохранён") detail:JML(@"Язык интерфейса изменится после перезапуска JimmMac из Finder. История и черновики сохранятся.")];
 }
 - (void)changeAppearance:(NSMenuItem *)sender {
     if (self.dataOperationInProgress) return;
     NSString *identifier=sender.representedObject;
-    if (![@[@"current",@"mac2011",@"pro2003"] containsObject:identifier]) return;
+    if (![JMThemeIdentifiers() containsObject:identifier]) return;
     [self.loginDefaults setObject:identifier forKey:@"InterfaceAppearance"]; [self.loginDefaults synchronize]; [self applyAppearance];
 }
 - (void)applyAppearance {
@@ -362,7 +416,7 @@ static NSString *JMState(NSDictionary *contact) {
     if ([previous isEqual:@"current"] && ![choice isEqual:@"current"]) self.unifiedFrame=self.chatWindow.frame;
     JMSetTheme(choice); self.appliedAppearance=JMThemeIdentifier();
     BOOL historic=JMTheme()!=JMThemeCurrent;
-    CGFloat rosterWidth=JMTheme()==JMThemePro2003 ? 232 : 252;
+    CGFloat rosterWidth=JMThemeIsMobile() ? 302 : (JMTheme()==JMThemePro2003 ? 232 : 252);
     if (historic && !self.rosterWindow) {
         self.rosterWindow=[[JMWindow alloc] initWithContentRect:NSMakeRect(20,100,268,620) styleMask:NSTitledWindowMask|NSClosableWindowMask|NSMiniaturizableWindowMask|NSResizableWindowMask backing:NSBackingStoreBuffered defer:NO];
         self.rosterWindow.title=JML(@"JimmMac — Контакты"); self.rosterWindow.releasedWhenClosed=NO; self.rosterWindow.delegate=self;
@@ -373,17 +427,28 @@ static NSString *JMState(NSDictionary *contact) {
     if (historic) {
         NSSize size=[(NSView *)self.rosterWindow.contentView frame].size; self.rosterWindow.contentMinSize=NSMakeSize(rosterWidth,JMTheme()==JMThemePro2003 ? 440 : 520); self.rosterWindow.contentMaxSize=NSMakeSize(rosterWidth,2000);
         [self.rosterWindow setContentSize:NSMakeSize(rosterWidth,MAX(self.rosterWindow.contentMinSize.height,MIN(size.height,620)))];
-        self.rosterWindow.title=JMTheme()==JMThemePro2003 ? @"ICQ Pro 2003b — JimmMac" : @"ICQ for Mac — JimmMac";
+        self.rosterWindow.title=JMThemeIsMobile() ? JML(@"JimmMac — Контакты") : (JMTheme()==JMThemePro2003 ? @"ICQ Pro 2003b — JimmMac" : @"ICQ for Mac — JimmMac");
     }
     NSView *parent=historic ? self.rosterWindow.contentView : self.chatWindow.contentView;
     for (NSView *view in @[self.toolbar,self.sidebar,self.statusLabel,self.soundButton,self.logoutButton]) {
         [view removeFromSuperview]; [parent addSubview:view];
     }
-    BOOL pro=JMTheme()==JMThemePro2003;
+    BOOL pro=JMTheme()==JMThemePro2003 || JMThemeIsMobile();
+    for (NSView *view in @[self.mobileFooter,self.mobileFind,self.mobileSettings]) {
+        [view removeFromSuperview];
+        if (JMThemeIsMobile()) [parent addSubview:view positioned:view==self.mobileFooter ? NSWindowBelow : NSWindowAbove relativeTo:nil];
+        view.hidden=!JMThemeIsMobile();
+    }
     for (NSView *view in @[self.addContactButton,self.writeConversationButton]) { [view removeFromSuperview]; [(pro ? parent : self.sidebar) addSubview:view]; }
     for (NSView *view in @[self.presencePopup,self.reconnectButton,self.presenceFeedback]) { [view removeFromSuperview]; [((view==self.presencePopup ? pro : historic) ? parent : self.toolbar) addSubview:view]; }
     [self.sectionControl removeFromSuperview]; [(JMTheme()==JMThemeMac2011 ? self.toolbar : self.sidebar) addSubview:self.sectionControl];
-    [self.themeMainMenu removeFromSuperview]; [(JMTheme()==JMThemeMac2011 ? self.toolbar : parent) addSubview:self.themeMainMenu]; self.themeMainMenu.hidden=!historic; self.themeMainMenu.tag=JMTheme()==JMThemeMac2011 ? 902 : 0;
+    [self.themeMainMenu removeFromSuperview];
+    [(JMTheme()==JMThemeMac2011 ? self.toolbar : parent) addSubview:self.themeMainMenu];
+    self.themeMainMenu.hidden=!historic;
+    NSMenuItem *menuCaption=[self.themeMainMenu itemAtIndex:0];
+    menuCaption.title=JMThemeIsMobile() ? JML(@"Меню") : JML(@"Главное");
+    menuCaption.image=JMThemeIsMobile() ? JMRetroImage(@"menu") : nil;
+    self.themeMainMenu.tag=JMTheme()==JMThemeMac2011 ? 902 : (JMTheme()==JMThemeJimm ? JMRetroFooterItemTag : 0);
     if (historic) {
         self.chatWindow.contentMinSize=pro ? NSMakeSize(480,320) : NSMakeSize(460,420);
         if (![previous isEqual:choice]) {
@@ -398,24 +463,36 @@ static NSString *JMState(NSDictionary *contact) {
     self.toolbar.topColor=JMLegacyHeaderTopColor(); self.toolbar.bottomColor=JMLegacyHeaderBottomColor(); self.toolbar.needsDisplay=YES;
     self.conversationHeader.hidden=!historic; self.conversationHeader.topColor=JMLegacyHeaderTopColor(); self.conversationHeader.bottomColor=JMLegacyHeaderBottomColor(); self.conversationHeader.needsDisplay=YES;
     self.sidebar.topColor=historic ? JMThemeBackground() : [NSColor colorWithCalibratedWhite:0.94 alpha:1]; self.sidebar.bottomColor=self.sidebar.topColor; self.sidebar.needsDisplay=YES;
-    self.contactTable.backgroundColor=historic ? [NSColor whiteColor] : self.sidebar.topColor;
+    self.contactTable.backgroundColor=JMThemeIsMobile() ? (JMTheme()==JMThemeQIP ? [NSColor colorWithCalibratedRed:0.86 green:0.92 blue:0.98 alpha:1] : JMThemeBackground()) : (historic ? [NSColor whiteColor] : self.sidebar.topColor);
+    [(JMContactTable *)self.contactTable setBlueRosterGradient:JMTheme()==JMThemeQIP];
     self.contactTable.enclosingScrollView.borderType=JMTheme()==JMThemePro2003 ? NSBezelBorder : NSNoBorder;
     self.contactTable.rowHeight=JMTheme()==JMThemePro2003 ? 18 : (JMTheme()==JMThemeMac2011 ? 34 : 60); if ([self.loginDefaults boolForKey:@"CompactContactList"]) self.contactTable.rowHeight=JMTheme()==JMThemePro2003 ? 18 : (JMTheme()==JMThemeMac2011 ? 28 : 42);
+    if (JMThemeIsMobile()) self.contactTable.rowHeight=[self.loginDefaults boolForKey:@"CompactContactList"] ? 34 : 40;
     self.sectionControl.segmentStyle=JMTheme()==JMThemePro2003 ? NSSegmentStyleSmallSquare : NSSegmentStyleRounded;
+    for (NSMenuItem *item in self.presencePopup.itemArray) item.image=JMStatusImage(item.representedObject);
     self.presencePopup.tag=JMTheme()==JMThemeMac2011 ? 901 : 0; self.sectionControl.tag=JMTheme()==JMThemeMac2011 ? 903 : 0; self.themeConversationTabs.tag=904;
     self.themeFavoriteButton.hidden=JMTheme()!=JMThemeMac2011;
-    for (NSInteger i=0;i<2;i++) { [self.sectionControl setLabel:JMTheme()==JMThemeMac2011 ? @"" : (i==0 ? JML(@"Контакты") : JML(@"Переписки")) forSegment:i]; [self.sectionControl setImage:JMTheme()==JMThemeMac2011 ? JMClassicToolbarImage(i==0 ? @"contacts" : @"conversations") : nil forSegment:i]; }
-    for (NSButton *button in @[self.profileButton,self.historySearchButton]) { button.image=historic ? (pro ? (button==self.profileButton ? JMStatusImage(@"online") : JMClassicToolbarImage(@"historyPage")) : JMClassicToolbarImage(button==self.historySearchButton ? @"history" : @"profile")) : nil; button.imagePosition=historic ? NSImageOnly : NSNoImage; }
+    for (NSInteger i=0;i<2;i++) { [self.sectionControl setLabel:JMTheme()==JMThemeMac2011 ? @"" : (i==0 ? JML(@"Контакты") : JML(@"Переписки")) forSegment:i]; [self.sectionControl setImage:JMTheme()==JMThemeMac2011 ? JMRetroImage(i==0 ? @"contacts" : @"conversations") : nil forSegment:i]; }
+    for (NSButton *button in @[self.profileButton,self.historySearchButton]) {
+        button.image=historic ? JMRetroImage(button==self.profileButton ? @"profile" : @"history") : nil;
+        button.imagePosition=button.image ? NSImageOnly : NSNoImage;
+    }
+    self.themeFavoriteButton.image=JMRetroImage(@"favorites");
+    self.themeSmileyButton.image=JMRetroImage(@"smiley-button") ?: JMClassicSmileyImage();
+    self.themeFontButton.image=JMRetroImage(@"font");
+    self.themeFontButton.imagePosition=self.themeFontButton.image ? NSImageOnly : NSNoImage;
+    self.mobileFind.image=JMRetroImage(@"find");
+    self.mobileSettings.image=JMRetroImage(@"settings");
     self.sectionControl.font=[NSFont systemFontOfSize:historic ? 11 : 13]; if (!historic) { [self.sectionControl setWidth:116 forSegment:0]; [self.sectionControl setWidth:116 forSegment:1]; } [self.sectionControl sizeToFit];
-    self.brandTitle.hidden=NO; self.brandTitle.stringValue=historic ? (pro ? @"ICQ Pro 2003b" : @"icq") : @"JimmMac";
-    self.brandImage.image=historic && !pro ? ([self.avatars imageForUIN:self.accountUIN] ?: [NSImage imageNamed:NSImageNameUser]) : JMFlowerImage();
+    self.brandTitle.hidden=NO; self.brandTitle.textColor=JMTheme()==JMThemePro2003 ? [NSColor whiteColor] : JMThemeHeaderInk(); self.accountLabel.textColor=JMThemeIsMobile() ? JMThemeHeaderInk() : [NSColor textColor]; self.brandTitle.stringValue=historic ? (pro ? @"ICQ Pro 2003b" : @"icq") : @"JimmMac";
+    self.brandImage.image=historic && !pro ? ([self.avatars imageForUIN:self.accountUIN] ?: JMRetroImage(@"avatar") ?: [NSImage imageNamed:NSImageNameUser]) : JMFlowerImage();
     self.accountLabel.alignment=historic ? NSLeftTextAlignment : NSRightTextAlignment; self.accountLabel.font=historic ? (pro ? [NSFont systemFontOfSize:11] : [NSFont boldSystemFontOfSize:13]) : [NSFont systemFontOfSize:12];
     self.brandSubtitle.hidden=pro; self.brandSubtitle.font=[NSFont systemFontOfSize:historic ? 10 : 11]; self.brandSubtitle.textColor=historic ? [NSColor colorWithCalibratedWhite:0.22 alpha:1] : JMSecondaryTextColor();
     self.brandSubtitle.stringValue=historic ? (JMString(self.ownInfo[@"statusMsg"]).length ? self.ownInfo[@"statusMsg"] : @"Jimm.online") : @"ICQ · Jimm.online"; self.brandSubtitle.toolTip=self.brandSubtitle.stringValue;
     self.presencePopup.font=[NSFont systemFontOfSize:historic ? 11 : 13]; self.groupFilter.font=self.presencePopup.font;
     [(NSSearchFieldCell *)self.searchField.cell setBezelStyle:JMTheme()==JMThemeMac2011 ? NSTextFieldSquareBezel : NSTextFieldRoundedBezel];
     self.searchField.font=[NSFont systemFontOfSize:historic ? 11 : 13];
-    self.transcript.backgroundColor=JMTheme()==JMThemeMac2011 ? [NSColor colorWithCalibratedRed:0.91 green:0.91 blue:0.87 alpha:1] : [NSColor whiteColor];
+    self.transcript.backgroundColor=JMThemeTranscriptColor();
     self.transcript.enclosingScrollView.borderType=pro ? NSBezelBorder : NSNoBorder;
     self.transcript.textContainerInset=historic ? NSMakeSize(pro ? 5 : 9,pro ? 6 : 12) : NSMakeSize(18,16);
     for (NSButton *button in @[self.addContactButton,self.writeConversationButton,self.profileButton,self.historySearchButton,self.addPeerButton,self.olderMessagesButton,self.newerMessagesButton,self.sendButton,self.soundButton,self.logoutButton,self.reconnectButton,self.themeCloseButton,self.themeSmileyButton,self.themeFontButton,self.themeFavoriteButton]) {
@@ -424,17 +501,21 @@ static NSString *JMState(NSDictionary *contact) {
     }
     self.sendButton.image=nil; self.sendButton.imagePosition=NSNoImage;
     for (NSWindow *window in [NSApp windows]) { window.backgroundColor=JMThemeBackground(); [(NSView *)window.contentView setNeedsDisplay:YES]; if (window!=self.chatWindow && window!=self.rosterWindow && ([window isKindOfClass:[JMWindow class]] || [window isKindOfClass:[JMPanel class]])) JMRefreshUtilityWindow(window); }
+    for (NSView *view in [(NSView *)self.loginWindow.contentView subviews]) {
+        if ([view isKindOfClass:[NSTextField class]] && NSMinY(view.frame)>=258) [(NSTextField *)view setTextColor:JMThemeHeaderInk()];
+    }
     for (NSView *view in [(NSView *)self.loginWindow.contentView subviews]) if ([view isKindOfClass:[JMChromeView class]]) { [(JMChromeView *)view setTopColor:JMLegacyHeaderTopColor()]; [(JMChromeView *)view setBottomColor:JMLegacyHeaderBottomColor()]; view.needsDisplay=YES; }
     NSArray *views=@[self.presencePopup,self.sectionControl,self.searchField,self.groupFilter,self.onlineOnlyCheckbox,self.favoritesOnlyCheckbox,self.contactTable,self.addContactButton,self.writeConversationButton,self.historySearchButton,self.profileButton,self.addPeerButton,self.conversationEmptyView.writeButton,self.olderMessagesButton,self.newerMessagesButton,self.transcript,self.latestMessagesButton,self.themeConversationTabs,self.themeConversationPicker,self.composer,self.themeSmileyButton,self.themeFontButton,self.sendButton,self.themeCloseButton,self.soundButton,self.logoutButton,self.reconnectButton,self.themeMainMenu,self.themeFavoriteButton,self.themeUINValue,self.themeNickValue];
     for (NSWindow *window in historic ? @[self.rosterWindow,self.chatWindow] : @[self.chatWindow]) {
         NSArray *ordered=views;
         if (historic && window==self.rosterWindow) ordered=JMTheme()==JMThemeMac2011 ? @[self.presencePopup,self.sectionControl,self.themeFavoriteButton,self.themeMainMenu,self.searchField,self.groupFilter,self.contactTable,self.addContactButton,self.writeConversationButton,self.soundButton,self.logoutButton,self.reconnectButton] : @[self.sectionControl,self.searchField,self.groupFilter,self.contactTable,self.addContactButton,self.writeConversationButton,self.soundButton,self.logoutButton,self.themeMainMenu,self.presencePopup,self.reconnectButton];
         else if (historic) ordered=JMTheme()==JMThemeMac2011 ? @[self.themeConversationTabs,self.themeConversationPicker,self.historySearchButton,self.profileButton,self.addPeerButton,self.olderMessagesButton,self.newerMessagesButton,self.transcript,self.latestMessagesButton,self.conversationEmptyView.writeButton,self.composer,self.themeSmileyButton,self.sendButton] : @[self.themeUINValue,self.themeNickValue,self.profileButton,self.historySearchButton,self.olderMessagesButton,self.newerMessagesButton,self.transcript,self.themeSmileyButton,self.themeFontButton,self.addPeerButton,self.conversationEmptyView.writeButton,self.composer,self.latestMessagesButton,self.sendButton,self.themeCloseButton];
+        if (JMThemeIsMobile() && window==self.rosterWindow) ordered=@[self.presencePopup,self.sectionControl,self.searchField,self.groupFilter,self.mobileUnread,self.contactTable,self.mobileFind,self.themeMainMenu,self.mobileSettings,self.reconnectButton];
         NSMutableArray *loop=[NSMutableArray array]; for (NSView *view in ordered) if (view.window==window) [loop addObject:view];
         for (NSUInteger i=0;i<loop.count;i++) [loop[i] setNextKeyView:loop[(i+1)%loop.count]];
         window.autorecalculatesKeyViewLoop=NO; window.initialFirstResponder=window==[self listWindow] ? (NSView *)self.searchField : self.composer;
     }
-    [self updateAccountLabel]; [self updatePeerLabel]; [self layoutChatWindow]; [self applyChatFont]; [self reloadContacts];
+    [self updateAccountLabel]; [self updatePeerLabel]; [self layoutChatWindow]; [self applyChatFont]; [self reloadContacts]; [self updateSendButton];
     if (historic && wasVisible) { [self.rosterWindow orderFront:nil]; if (!self.selectedPeer.length) [self.chatWindow orderOut:nil]; }
     if (!historic && wasVisible) [self.chatWindow makeKeyAndOrderFront:nil];
 }
@@ -647,37 +728,122 @@ static NSString *JMState(NSDictionary *contact) {
     if ((age>=0 && age<6*3600) || self.updateRetryDate.timeIntervalSinceNow>0) return;
     [self checkUpdatesAutomatically:YES];
 }
-- (void)checkForUpdates:(id)sender { [self checkUpdatesAutomatically:NO]; }
+- (void)createUpdateWindow {
+    NSRect frame=NSMakeRect(0,0,500,250);
+    self.updateWindow=[[JMWindow alloc] initWithContentRect:frame styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
+    self.updateWindow.title=JML(@"Проверка обновлений");
+    self.updateWindow.releasedWhenClosed=NO;
+    self.updateWindow.delegate=self;
+    self.updateWindow.contentView=[[JMWindowView alloc] initWithFrame:frame];
+    NSView *root=self.updateWindow.contentView;
+
+    self.updateProgress=[[NSProgressIndicator alloc] initWithFrame:NSMakeRect(20,203,22,22)];
+    self.updateProgress.style=NSProgressIndicatorSpinningStyle;
+    self.updateProgress.indeterminate=YES;
+    self.updateProgress.hidden=YES;
+    [root addSubview:self.updateProgress];
+    self.updateHeading=JMLabel(@"",NSMakeRect(52,199,428,28),16,YES);
+    [root addSubview:self.updateHeading];
+
+    NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(19,57,462,134)];
+    scroll.hasVerticalScroller=YES;
+    scroll.autohidesScrollers=YES;
+    scroll.borderType=NSBezelBorder;
+    self.updateDetail=[[NSTextView alloc] initWithFrame:scroll.contentView.bounds];
+    self.updateDetail.editable=NO;
+    self.updateDetail.selectable=YES;
+    self.updateDetail.font=[NSFont systemFontOfSize:13];
+    self.updateDetail.textContainerInset=NSMakeSize(9,8);
+    self.updateDetail.autoresizingMask=NSViewWidthSizable;
+    self.updateDetail.textContainer.widthTracksTextView=YES;
+    scroll.documentView=self.updateDetail;
+    [root addSubview:scroll];
+
+    NSButton *close=JMButton(JML(@"Закрыть"),NSMakeRect(20,13,117,29),self,@selector(closeUpdateWindow:));
+    close.keyEquivalent=@"\e";
+    [root addSubview:close];
+    self.updateAction=JMButton(@"",NSMakeRect(310,13,171,29),self,@selector(updateWindowAction:));
+    [root addSubview:self.updateAction];
+    [self.updateWindow center];
+}
+- (void)closeUpdateWindow:(id)sender { [self.updateWindow close]; }
+- (void)windowWillClose:(NSNotification *)notification {
+    if (notification.object==self.updateWindow) {
+        [self.updateProgress stopAnimation:nil];
+        self.updateProgress.hidden=YES;
+    }
+}
+- (void)updateWindowAction:(id)sender {
+    if (self.updateReleaseURL) [self openExternalURL:self.updateReleaseURL];
+    else [self checkForUpdates:nil];
+}
+- (void)checkForUpdates:(id)sender {
+    if (self.terminating) return;
+    if (!self.updateWindow) [self createUpdateWindow];
+    self.manualUpdateRequested=YES;
+    self.updateReleaseURL=nil;
+    self.updateAction.hidden=YES;
+    JMSetLabel(self.updateHeading,JML(@"Проверяем обновления…"));
+    self.updateDetail.string=JML(@"Запрашиваем последний релиз JimmMac на GitHub.");
+    self.updateProgress.hidden=NO;
+    JMRefreshUtilityWindow(self.updateWindow);
+    [self.updateWindow makeKeyAndOrderFront:nil];
+    [self.updateProgress startAnimation:nil];
+    [self.updateWindow displayIfNeeded];
+    [self checkUpdatesAutomatically:NO];
+}
+- (void)finishManualUpdateWithTitle:(NSString *)title detail:(NSString *)detail releaseURL:(NSURL *)url retry:(BOOL)retry {
+    [self.updateProgress stopAnimation:nil];
+    self.updateProgress.hidden=YES;
+    JMSetLabel(self.updateHeading,title);
+    self.updateDetail.string=detail;
+    [self.updateDetail scrollRangeToVisible:NSMakeRange(0,0)];
+    self.updateReleaseURL=url;
+    self.updateAction.hidden=!url && !retry;
+    if (url || retry) self.updateAction.title=url ? JML(@"Открыть релиз") : JML(@"Повторить");
+}
+
 - (void)checkUpdatesAutomatically:(BOOL)automatic {
     if (self.checkingUpdates || self.terminating) return; self.checkingUpdates=YES;
     if (!self.updateChecker) self.updateChecker=[self makeUpdateChecker];
     [self.updateChecker check:^(NSDictionary *release,NSError *error) {
         self.checkingUpdates=NO; if (self.terminating) return;
+        BOOL manual=self.manualUpdateRequested;
+        BOOL manualVisible=manual && self.updateWindow.isVisible;
+        self.manualUpdateRequested=NO;
         if (error) {
             if (automatic) self.updateRetryDate=[NSDate dateWithTimeIntervalSinceNow:3600];
-            else [self showError:JML(@"Не удалось проверить обновления") detail:JML(@"Проверьте подключение к интернету и повторите позже. Релизы также доступны на github.com/MiChiRose/JimmMac.")];
+            if (manualVisible) [self finishManualUpdateWithTitle:JML(@"Не удалось проверить обновления")
+                detail:JML(@"Проверьте подключение к интернету и повторите позже. Релизы также доступны на github.com/MiChiRose/JimmMac.")
+                releaseURL:nil retry:YES];
             return;
         }
         self.updateRetryDate=nil;
         [self.loginDefaults setObject:[NSDate date] forKey:@"LastSuccessfulUpdateCheck"];
-        NSString *current=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.15.0";
+        NSString *current=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.16.0";
         BOOL newer=[JMUpdateChecker compareVersion:release[@"version"] to:current]==NSOrderedDescending;
-        if (automatic) {
+        if (manualVisible) {
+            if (newer) { self.pendingUpdateRelease=nil; [self.loginDefaults setObject:release[@"version"] forKey:@"UpdateNoticeShownVersion"]; }
+            [self presentUpdateRelease:release automatic:NO];
+        } else if (automatic && !manual) {
             if ([self automaticUpdatesEnabled] && newer && ![[self.loginDefaults stringForKey:@"UpdateNoticeShownVersion"] isEqual:release[@"version"]]) {
                 self.pendingUpdateRelease=release; [self presentPendingUpdateIfPossible];
             }
-        } else {
-            if (newer) { self.pendingUpdateRelease=nil; [self.loginDefaults setObject:release[@"version"] forKey:@"UpdateNoticeShownVersion"]; }
-            [self presentUpdateRelease:release automatic:NO];
         }
     }];
 }
 - (void)presentUpdateRelease:(NSDictionary *)release automatic:(BOOL)automatic {
-    NSString *current=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.15.0";
+    NSString *current=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.16.0";
     BOOL newer=[JMUpdateChecker compareVersion:release[@"version"] to:current]==NSOrderedDescending;
-    NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=newer ? [NSString stringWithFormat:JML(@"Доступен JimmMac %@"),release[@"version"]] : JML(@"У вас актуальная версия JimmMac");
+    NSString *title=newer ? [NSString stringWithFormat:JML(@"Доступен JimmMac %@"),release[@"version"]] : JML(@"У вас актуальная версия JimmMac");
     NSString *notes=JMString(release[@"notes"]); if (notes.length>1600) notes=[[notes substringToIndex:1600] stringByAppendingString:@"…"];
-    alert.informativeText=newer ? [NSString stringWithFormat:JML(@"Установлена версия %@.\n\n%@\n\nСкачайте обновление на GitHub. Установка выполняется вручную."),current,notes] : [NSString stringWithFormat:JML(@"Установлена %@. Последний опубликованный релиз — %@."),current,release[@"version"]];
+    NSString *detail=newer ? [NSString stringWithFormat:JML(@"Установлена версия %@.\n\n%@\n\nСкачайте обновление на GitHub. Установка выполняется вручную."),current,notes] : [NSString stringWithFormat:JML(@"Установлена %@. Последний опубликованный релиз — %@."),current,release[@"version"]];
+    if (!automatic) {
+        [self finishManualUpdateWithTitle:title detail:detail releaseURL:newer ? release[@"url"] : nil retry:NO];
+        return;
+    }
+    NSAlert *alert=[[NSAlert alloc] init];
+    alert.messageText=title; alert.informativeText=detail;
     [alert addButtonWithTitle:newer ? JML(@"Открыть релиз") : JML(@"Хорошо")];
     if (newer) { NSButton *cancel=[alert addButtonWithTitle:JML(@"Позже")]; cancel.keyEquivalent=@"\e"; }
     if ([alert runModal]==NSAlertFirstButtonReturn && newer) [self openExternalURL:release[@"url"]];
@@ -752,6 +918,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSMenuItem *fileItem=[[NSMenuItem alloc] initWithTitle:JML(@"Файл") action:NULL keyEquivalent:@""];
     NSMenu *file=[[NSMenu alloc] initWithTitle:JML(@"Файл")];
     for (NSDictionary *entry in @[@{@"title":JML(@"Перейти к дню…"),@"action":@"showHistoryDay:"},@{@"title":JML(@"Закладки сообщений…"),@"action":@"showBookmarks:"}]) { NSMenuItem *item=[file addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self; }
+    NSMenuItem *recover=[file addItemWithTitle:JML(@"Восстановить сообщения сессии…") action:@selector(restoreRecentMessages:) keyEquivalent:@""]; recover.target=self;
     NSMenuItem *write=[file addItemWithTitle:JML(@"Написать по UIN…") action:@selector(openConversation:) keyEquivalent:@"n"]; write.target=self;
     NSMenuItem *add=[file addItemWithTitle:JML(@"Добавить контакт…") action:@selector(addContact:) keyEquivalent:@"N"]; add.target=self; add.keyEquivalentModifierMask=NSCommandKeyMask|NSShiftKeyMask;
     [file addItem:[NSMenuItem separatorItem]];
@@ -785,12 +952,15 @@ static NSString *JMState(NSDictionary *contact) {
     for (NSDictionary *entry in @[@{@"title":JML(@"Только в сети"),@"action":@"toggleOnlineFilter:"},@{@"title":JML(@"Только избранные"),@"action":@"toggleFavoritesFilter:"},@{@"title":JML(@"Классические смайлики"),@"action":@"toggleEmoticons:"}]) {
         NSMenuItem *item=[viewMenu addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self;
     }
+    NSMenuItem *unreadFilter=[viewMenu addItemWithTitle:JML(@"Только непрочитанные") action:@selector(toggleUnreadFilter:) keyEquivalent:@"u"]; unreadFilter.target=self;
+    unreadFilter.keyEquivalentModifierMask=NSCommandKeyMask|NSShiftKeyMask;
+    NSMenuItem *collapse=[viewMenu addItemWithTitle:JML(@"Свернуть или развернуть группу") action:@selector(toggleSelectedGroup:) keyEquivalent:@""]; collapse.target=self;
     NSMenuItem *appearanceItem=[[NSMenuItem alloc] initWithTitle:JML(@"Оформление") action:NULL keyEquivalent:@""]; NSMenu *appearance=[[NSMenu alloc] initWithTitle:JML(@"Оформление")];
-    NSArray *themeNames=@[JML(@"Текущий"),JML(@"Ностальгия · ICQ для Mac 2011"),JML(@"Ностальгия · ICQ Pro 2003b")], *themeIDs=@[@"current",@"mac2011",@"pro2003"];
+    NSArray *themeNames=@[JML(@"Текущий"),JML(@"Ностальгия · ICQ для Mac 2011"),JML(@"Ностальгия · ICQ Pro 2003b"),@"QIP",@"Jimm"], *themeIDs=JMThemeIdentifiers();
     for (NSUInteger i=0;i<themeIDs.count;i++) { NSMenuItem *item=[appearance addItemWithTitle:themeNames[i] action:@selector(changeAppearance:) keyEquivalent:@""]; item.target=self; item.representedObject=themeIDs[i]; }
     appearanceItem.submenu=appearance; [viewMenu addItem:appearanceItem];
     NSMenuItem *languageItem=[[NSMenuItem alloc] initWithTitle:JML(@"Язык интерфейса") action:NULL keyEquivalent:@""]; NSMenu *languageMenu=[[NSMenu alloc] initWithTitle:JML(@"Язык интерфейса")];
-    NSArray *languageNames=@[JML(@"Русский"),@"English"], *languages=@[@"ru",@"en"];
+    NSArray *languageNames=@[JML(@"Русский"),@"English",JML(@"Українська"),JML(@"Беларуская")], *languages=@[@"ru",@"en",@"uk",@"be"];
     for (NSUInteger i=0;i<languages.count;i++) { NSMenuItem *item=[languageMenu addItemWithTitle:languageNames[i] action:@selector(changeLanguage:) keyEquivalent:@""]; item.target=self; item.representedObject=languages[i]; }
     languageItem.submenu=languageMenu; [viewMenu addItem:languageItem];
     viewItem.submenu=viewMenu; [bar addItem:viewItem];
@@ -802,6 +972,8 @@ static NSString *JMState(NSDictionary *contact) {
     NSMenuItem *favorite=[contactsMenu addItemWithTitle:JML(@"Добавить в избранное") action:@selector(toggleFavorite:) keyEquivalent:@""]; favorite.target=self;
     NSMenuItem *mute=[contactsMenu addItemWithTitle:JML(@"Отключить уведомления") action:@selector(toggleMuteConversation:) keyEquivalent:@""]; mute.target=self;
     [contactsMenu addItem:[NSMenuItem separatorItem]];
+    NSMenuItem *block=[contactsMenu addItemWithTitle:JML(@"Блокировка контакта…") action:@selector(toggleContactBlock:) keyEquivalent:@""]; block.target=self;
+    NSMenuItem *blocked=[contactsMenu addItemWithTitle:JML(@"Список блокировки…") action:@selector(showBlockedContacts:) keyEquivalent:@""]; blocked.target=self;
     NSMenuItem *groups=[contactsMenu addItemWithTitle:JML(@"Управление группами…") action:@selector(showGroups:) keyEquivalent:@""]; groups.target=self;
     [contactsItem setSubmenu:contactsMenu]; [bar addItem:contactsItem];
     NSMenuItem *soundsItem=[[NSMenuItem alloc] initWithTitle:JML(@"Звуки") action:NULL keyEquivalent:@""];
@@ -896,6 +1068,102 @@ static NSString *JMState(NSDictionary *contact) {
         });
     });
 }
+- (void)finishBlockChangeForPeer:(NSString *)peer blocked:(BOOL)blocked enableDenyMode:(BOOL)enableMode {
+    JMHistory *history=self.history;
+    __weak JMAppDelegate *weakSelf=self;
+    [self.client setBlocked:blocked peer:peer enableDenyMode:enableMode completion:^(NSDictionary *privacy, NSError *error) {
+        JMAppDelegate *self=weakSelf;
+        if (!self || self.history!=history) return;
+        self.changingPrivacy=NO;
+        if (error) [self showError:JML(@"Не удалось подтвердить блокировку") detail:error.localizedDescription];
+        else [self showError:blocked ? JML(@"Контакт заблокирован") : JML(@"Контакт разблокирован") detail:[NSString stringWithFormat:@"UIN %@",peer]];
+    }];
+}
+- (void)toggleContactBlock:(id)sender {
+    NSString *peer=[self contactForAction:sender];
+    if (!self.client.connected || self.changingPrivacy || !JMValidUIN(peer) || [peer isEqual:self.accountUIN]) return;
+    self.changingPrivacy=YES;
+    JMHistory *history=self.history;
+    __weak JMAppDelegate *weakSelf=self;
+    [self.client fetchPrivacy:^(NSDictionary *privacy, NSError *error) {
+        JMAppDelegate *self=weakSelf;
+        if (!self || self.history!=history) return;
+        if (error) { self.changingPrivacy=NO; [self showError:JML(@"Не удалось загрузить список блокировки") detail:error.localizedDescription]; return; }
+        BOOL blocked=[JMBlockedUINs(privacy) containsObject:peer];
+        NSString *mode=JMString(privacy[@"pdMode"]);
+        BOOL enableMode=!blocked && [mode isEqual:@"permitAll"];
+        if (!blocked && !enableMode && ![mode isEqual:@"denySome"]) {
+            self.changingPrivacy=NO;
+            [self showError:JML(@"Действует другой режим приватности") detail:JML(@"Чтобы заблокировать отдельный контакт, выберите на сервере режим «Все, кроме заблокированных».")];
+            return;
+        }
+        NSAlert *alert=[[NSAlert alloc] init];
+        alert.messageText=blocked ? JML(@"Разблокировать контакт?") : JML(@"Заблокировать контакт?");
+        alert.informativeText=[NSString stringWithFormat:@"UIN %@\n%@",peer,enableMode ? JML(@"Режим изменится на «Все, кроме заблокированных». Записи, уже находящиеся в списке блокировки, тоже вступят в силу.") : JML(@"Изменение применяется на сервере Jimm.online.")];
+        [alert addButtonWithTitle:blocked ? JML(@"Разблокировать") : JML(@"Заблокировать")];
+        [[alert addButtonWithTitle:JML(@"Отмена")] setKeyEquivalent:@"\e"];
+        if ([alert runModal]==NSAlertFirstButtonReturn && self.history==history) [self finishBlockChangeForPeer:peer blocked:!blocked enableDenyMode:enableMode];
+        else self.changingPrivacy=NO;
+    }];
+}
+- (void)showBlockedContacts:(id)sender {
+    if (!self.client.connected || self.changingPrivacy) return;
+    self.changingPrivacy=YES;
+    JMHistory *history=self.history;
+    __weak JMAppDelegate *weakSelf=self;
+    [self.client fetchPrivacy:^(NSDictionary *privacy,NSError *error) {
+        JMAppDelegate *self=weakSelf;
+        if (!self || self.history!=history) return;
+        if (error) { self.changingPrivacy=NO; [self showError:JML(@"Не удалось загрузить список блокировки") detail:error.localizedDescription]; return; }
+        NSArray *peers=JMBlockedUINs(privacy);
+        if (!peers.count) { self.changingPrivacy=NO; [self showError:JML(@"Список блокировки") detail:JML(@"Заблокированных контактов нет.")]; return; }
+        NSAlert *alert=[[NSAlert alloc] init];
+        alert.messageText=JML(@"Список блокировки");
+        alert.informativeText=JML(@"Выберите UIN, чтобы убрать его из серверного списка.");
+        NSPopUpButton *picker=[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,320,28) pullsDown:NO];
+        for (NSString *peer in peers) {
+            NSString *name=JMName(self.contacts[peer] ?: @{@"aimId":peer});
+            [picker addItemWithTitle:[NSString stringWithFormat:@"%@ · UIN %@",name,peer]];
+            picker.lastItem.representedObject=peer;
+        }
+        alert.accessoryView=picker;
+        [[alert addButtonWithTitle:JML(@"Закрыть")] setKeyEquivalent:@"\e"];
+        [alert addButtonWithTitle:JML(@"Разблокировать")];
+        if ([alert runModal]==NSAlertSecondButtonReturn && self.history==history) [self finishBlockChangeForPeer:picker.selectedItem.representedObject blocked:NO enableDenyMode:NO];
+        else self.changingPrivacy=NO;
+    }];
+}
+- (void)restoreRecentMessages:(id)sender {
+    if (!self.client.connected || self.restoringMessages || !self.history || !JMValidUIN(self.selectedPeer)) return;
+    BOOL manual=sender!=nil;
+    NSString *peer=[self.selectedPeer copy], *uin=[self.accountUIN copy];
+    JMHistory *history=self.history;
+    self.restoringMessages=YES;
+    __weak JMAppDelegate *weakSelf=self;
+    [self.client fetchStoredMessagesForPeer:peer completion:^(NSDictionary *data, NSError *error) {
+        JMAppDelegate *self=weakSelf;
+        if (!self || self.history!=history) return;
+        self.restoringMessages=NO;
+        if (!error && ![data[@"msgs"] isKindOfClass:[NSArray class]]) {
+            error=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер вернул неизвестный формат истории.")}];
+        }
+        if (error) { if (manual) [self showError:JML(@"Не удалось восстановить сообщения") detail:error.localizedDescription]; return; }
+        NSUInteger added=0; BOOL saved=YES;
+        for (id row in [JMArray(data[@"msgs"]) reverseObjectEnumerator]) {
+            NSDictionary *message=JMMessageFromStoredIM(JMDictionary(row),peer,uin);
+            if (!message) continue;
+            BOOL inserted=NO;
+            if (![self saveIncomingMessage:message quiet:YES inserted:&inserted]) { saved=NO; break; }
+            if (inserted) added++;
+        }
+        if (added) {
+            [self persistConversationPeers];
+            if ([peer isEqual:self.selectedPeer]) [self renderTranscript];
+            [self reloadContacts]; [self updateDockBadge];
+        }
+        if (manual && saved) [self showError:JML(@"История текущей сессии проверена") detail:[NSString stringWithFormat:JML(@"Добавлено сообщений: %lu"),(unsigned long)added]];
+    }];
+}
 - (void)showDiagnostics:(id)sender {
     if (!self.diagnosticsWindow) {
         self.diagnosticsWindow=[[JMWindow alloc] initWithContentRect:NSMakeRect(0,0,660,380) styleMask:NSTitledWindowMask|NSClosableWindowMask|NSResizableWindowMask backing:NSBackingStoreBuffered defer:NO];
@@ -937,7 +1205,10 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)activateContactSelection:(id)sender {
     NSInteger row=self.contactTable.selectedRow;
-    if (row>=0 && row<(NSInteger)self.visibleContacts.count) [self selectPeer:self.visibleContacts[(NSUInteger)row][@"aimId"]];
+    if (row<0 || row>=(NSInteger)self.visibleContacts.count) return;
+    NSDictionary *contact=self.visibleContacts[(NSUInteger)row];
+    if (contact[@"_collapsedGroup"]) [self toggleGroup:contact[@"_collapsedGroup"]];
+    else [self selectPeer:contact[@"aimId"]];
 }
 - (void)handleEscapeInWindow:(NSWindow *)window {
     if (window==self.rosterWindow) {
@@ -1035,7 +1306,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.sectionControl setAutoresizingMask:NSViewMinYMargin]; [sidebar addSubview:self.sectionControl];
     self.searchField = [[JMThemedSearchField alloc] initWithFrame:NSMakeRect(12,480,244,25)];
     [[self.searchField cell] setPlaceholderString:JML(@"Поиск контактов")]; [(NSTextField *)self.searchField setDelegate:self];
-    [self.searchField setToolTip:JML(@"Поиск по имени или UIN в выбранном разделе")];
+    [self.searchField setToolTip:[JML(@"Поиск по имени или UIN в выбранном разделе") stringByAppendingString:@" · ⌘L"]];
     [self.searchField setAutoresizingMask:NSViewMinYMargin]; [sidebar addSubview:self.searchField];
     self.groupFilter=[[JMThemedPopUpButton alloc] initWithFrame:NSMakeRect(12,442,244,29) pullsDown:NO];
     self.groupFilter.target=self; self.groupFilter.action=@selector(groupFilterChanged:); [self.groupFilter setAutoenablesItems:NO];
@@ -1051,6 +1322,13 @@ static NSString *JMState(NSDictionary *contact) {
     [self.contactTable setIntercellSpacing:NSMakeSize(0,0)];
     self.contactTable.target=self; self.contactTable.doubleAction=@selector(activateContactSelection:);
     [(JMContactTable *)self.contactTable setActivateAction:@selector(activateContactSelection:)];
+    __weak JMAppDelegate *weakListOwner=self;
+    [(JMContactTable *)self.contactTable setHandleHeaderClick:^BOOL(NSInteger row, CGFloat offset) {
+        JMAppDelegate *self=weakListOwner;
+        if (!self || self.sectionControl.selectedSegment!=0 || self.searchField.stringValue.length || offset>=[self headerHeightForRow:row]) return NO;
+        [self toggleGroup:[self historicalGroupForContact:self.visibleContacts[(NSUInteger)row]]];
+        return YES;
+    }];
     self.contactTable.toolTip=JML(@"↑/↓ — выбрать собеседника; Enter — перейти к сообщению. Правый щелчок — действия с контактом.");
     [self.contactTable setDataSource:self]; [self.contactTable setDelegate:self];
     [self.contactTable setColumnAutoresizingStyle:NSTableViewLastColumnOnlyAutoresizingStyle];
@@ -1075,7 +1353,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.chatPane=chat; self.conversationHeader=[[JMConversationChrome alloc] initWithFrame:NSZeroRect]; self.conversationHeader.hidden=YES; [chat addSubview:self.conversationHeader];
     [chat setAutoresizingMask:NSViewWidthSizable|NSViewHeightSizable]; [root addSubview:chat];
     self.peerAvatar=[[JMClassicAvatarView alloc] initWithFrame:NSMakeRect(6,500,44,44)];
-    [self.peerAvatar setImageScaling:NSImageScaleProportionallyUpOrDown]; [self.peerAvatar setImage:[NSImage imageNamed:NSImageNameUser]];
+    [self.peerAvatar setImageScaling:NSImageScaleProportionallyUpOrDown]; [self.peerAvatar setImage:(JMTheme()==JMThemeMac2011 ? JMRetroImage(@"avatar") : nil) ?: [NSImage imageNamed:NSImageNameUser]];
     [self.peerAvatar setAutoresizingMask:NSViewMinYMargin]; [chat addSubview:self.peerAvatar];
     self.peerLabel = JMLabel(JML(@"Выберите собеседника"),NSMakeRect(63,522,395,24),16,YES);
     [self.peerLabel setAutoresizingMask:NSViewMinYMargin|NSViewWidthSizable]; [chat addSubview:self.peerLabel];
@@ -1135,16 +1413,32 @@ static NSString *JMState(NSDictionary *contact) {
     self.themeUINValue=JMLabel(@"",NSZeroRect,10,NO); self.themeUINValue.font=[NSFont userFixedPitchFontOfSize:10]; self.themeNickValue=JMLabel(@"",NSZeroRect,11,NO);
     for (NSTextField *field in @[self.themeUINValue,self.themeNickValue]) { field.selectable=YES; field.bezeled=YES; field.bezelStyle=NSTextFieldSquareBezel; field.drawsBackground=YES; field.backgroundColor=[NSColor colorWithSRGBRed:216.0/255 green:219.0/255 blue:231.0/255 alpha:1]; [chat addSubview:field]; }
     [chat addSubview:self.themeUINTitle]; [chat addSubview:self.themeNickTitle]; self.themeRecipientState=[[NSImageView alloc] initWithFrame:NSZeroRect]; [chat addSubview:self.themeRecipientState];
-    self.themeFavoriteButton=JMButton(JML(@"Избранные"),NSZeroRect,self,@selector(toggleFavoritesFilter:)); self.themeFavoriteButton.image=JMClassicToolbarImage(@"favorites"); self.themeFavoriteButton.imagePosition=NSImageOnly; [self.themeFavoriteButton setButtonType:NSPushOnPushOffButton]; self.themeFavoriteButton.toolTip=JML(@"Показывать только избранных. Добавление — через правый щелчок по контакту"); [toolbar addSubview:self.themeFavoriteButton];
+    self.themeFavoriteButton=JMButton(JML(@"Избранные"),NSZeroRect,self,@selector(toggleFavoritesFilter:)); self.themeFavoriteButton.image=JMRetroImage(@"favorites"); self.themeFavoriteButton.imagePosition=NSImageOnly; [self.themeFavoriteButton setButtonType:NSPushOnPushOffButton]; self.themeFavoriteButton.toolTip=JML(@"Показывать только избранных. Добавление — через правый щелчок по контакту"); [toolbar addSubview:self.themeFavoriteButton];
     self.themeCloseButton=JMButton(JML(@"Закрыть"),NSZeroRect,self,@selector(closeHistoricalConversation:)); [chat addSubview:self.themeCloseButton];
     self.themeSmileyButton=JMButton(JML(@"Смайлики"),NSZeroRect,self,@selector(showClassicSmileys:)); self.themeSmileyButton.image=JMClassicSmileyImage(); self.themeSmileyButton.imagePosition=NSImageOnly; self.themeSmileyButton.toolTip=JML(@"Вставить смайлик в черновик"); [chat addSubview:self.themeSmileyButton];
     self.themeFontButton=JMButton(@"T ▾",NSZeroRect,self,@selector(showClassicFontMenu:)); self.themeFontButton.tag=905; self.themeFontButton.toolTip=JML(@"Настройки шрифта переписки"); [chat addSubview:self.themeFontButton];
     self.themeComposerCount=JMLabel(@"",NSZeroRect,10,NO); [chat addSubview:self.themeComposerCount];
     self.themeConversationTabs=[[NSSegmentedControl alloc] initWithFrame:NSZeroRect]; self.themeConversationTabs.cell=[[JMThemedSegmentedCell alloc] init]; self.themeConversationTabs.target=self; self.themeConversationTabs.action=@selector(changeHistoricalTab:); self.themeConversationTabs.font=[NSFont systemFontOfSize:11]; [chat addSubview:self.themeConversationTabs];
     self.themeConversationPicker=[[JMThemedPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:YES]; self.themeConversationPicker.font=[NSFont systemFontOfSize:10]; self.themeConversationPicker.toolTip=JML(@"Открыть любую сохранённую переписку"); [chat addSubview:self.themeConversationPicker];
+    self.mobileFooter=[[JMChromeView alloc] initWithFrame:NSZeroRect];
+    self.mobileFind=JMButton(JML(@"Найти"),NSZeroRect,self,@selector(focusContactSearch:));
+    self.mobileFind.image=JMRetroImage(@"find"); self.mobileFind.imagePosition=NSImageLeft; self.mobileFind.tag=JMRetroFooterItemTag;
+    self.mobileFind.toolTip=JML(@"Поиск в списке · ⌘L");
+    self.mobileSettings=JMButton(JML(@"Настройки"),NSZeroRect,self,@selector(showPreferences:));
+    self.mobileSettings.image=JMRetroImage(@"settings");
+    self.mobileSettings.imagePosition=NSImageLeft;
+    self.mobileSettings.tag=JMRetroFooterItemTag;
+    self.mobileSettings.toolTip=JML(@"Настройки · ⌘,");
+    self.mobileUnread=JMButton(JML(@"Непрочитанные"),NSZeroRect,self,@selector(toggleUnreadFilter:));
+    [self.mobileUnread setButtonType:NSPushOnPushOffButton];
+    self.mobileUnread.toolTip=JML(@"Только непрочитанные · ⇧⌘U");
+    self.mobileUnread.hidden=YES;
+    [sidebar addSubview:self.mobileUnread];
+    self.mobileChatTitle=JMLabel(@"",NSZeroRect,14,YES);
+    [chat addSubview:self.mobileChatTitle];
     self.themeMainMenu=[[JMThemedPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:YES]; self.themeMainMenu.font=[NSFont systemFontOfSize:11]; self.themeMainMenu.toolTip=JML(@"Профиль, настройки и сведения о JimmMac"); [root addSubview:self.themeMainMenu];
-    [self.themeMainMenu addItemWithTitle:JML(@"Главное")];
-    for (NSDictionary *item in @[@{@"title":JML(@"Мой профиль…"),@"action":@"showOwnProfile:"},@{@"title":JML(@"Настройки…"),@"action":@"showPreferences:"},@{@"title":JML(@"О JimmMac"),@"action":@"about:"}]) { [self.themeMainMenu addItemWithTitle:item[@"title"]]; self.themeMainMenu.lastItem.target=self; self.themeMainMenu.lastItem.action=NSSelectorFromString(item[@"action"]); }
+    [self.themeMainMenu addItemWithTitle:JML(@"Меню")];
+    for (NSDictionary *item in @[@{@"title":JML(@"Мой профиль…"),@"action":@"showOwnProfile:"},@{@"title":JML(@"Настройки…"),@"action":@"showPreferences:"},@{@"title":JML(@"О JimmMac"),@"action":@"about:"},@{@"title":JML(@"Добавить контакт…"),@"action":@"addContact:"},@{@"title":JML(@"Написать по UIN…"),@"action":@"openConversation:"},@{@"title":JML(@"Список блокировки…"),@"action":@"showBlockedContacts:"},@{@"title":JML(@"Выйти из аккаунта"),@"action":@"logout:"}]) { [self.themeMainMenu addItemWithTitle:item[@"title"]]; self.themeMainMenu.lastItem.target=self; self.themeMainMenu.lastItem.action=NSSelectorFromString(item[@"action"]); }
     NSMenuItem *groups=[self.themeMainMenu.menu addItemWithTitle:JML(@"Группы контактов") action:NULL keyEquivalent:@""]; self.themeGroupMenu=[[NSMenu alloc] initWithTitle:JML(@"Группы контактов")]; groups.submenu=self.themeGroupMenu;
     // Include every control in the loop. AppKit skips hidden/disabled controls
     // and follows the user's Full Keyboard Access preference for buttons.
@@ -1159,10 +1453,12 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)layoutChatWindow {
     CGFloat width=NSWidth([(NSView *)self.chatWindow.contentView bounds]), height=NSHeight([(NSView *)self.chatWindow.contentView bounds]);
-    BOOL historic=JMTheme()!=JMThemeCurrent, mac=JMTheme()==JMThemeMac2011, pro=JMTheme()==JMThemePro2003;
+    BOOL mobile=JMThemeIsMobile(), historic=JMTheme()!=JMThemeCurrent, mac=JMTheme()==JMThemeMac2011, pro=JMTheme()==JMThemePro2003 || mobile;
+    BOOL red=JMTheme()==JMThemeJimm;
+    CGFloat mobileFooterHeight=red ? 47 : 36;
     CGFloat rosterWidth=historic ? NSWidth([(NSView *)self.rosterWindow.contentView bounds]) : 268;
     if (historic && self.rosterWindow) {
-        CGFloat rh=NSHeight([(NSView *)self.rosterWindow.contentView bounds]), header=mac ? 119 : 48, footer=pro ? 78 : 62;
+        CGFloat rh=NSHeight([(NSView *)self.rosterWindow.contentView bounds]), header=mobile ? 67 : (mac ? 119 : 48), footer=mobile ? mobileFooterHeight+27 : (pro ? 78 : 62);
         self.toolbar.frame=NSMakeRect(0,rh-header,rosterWidth,header); self.sidebar.frame=NSMakeRect(0,footer,rosterWidth,rh-header-footer);
         self.chatPane.frame=NSMakeRect(0,0,width,height);
         self.brandTitle.frame=NSMakeRect(29,header-21,rosterWidth-36,18); self.brandTitle.font=[NSFont boldSystemFontOfSize:pro ? 11 : 13];
@@ -1186,6 +1482,7 @@ static NSString *JMState(NSDictionary *contact) {
         self.statusLabel.frame=NSMakeRect(12,8,width-260,20); [self.statusLabel.cell setWraps:NO]; self.soundButton.frame=NSMakeRect(width-238,3,132,30); self.logoutButton.frame=NSMakeRect(width-102,3,94,30);
     }
     BOOL groups=self.sectionControl.selectedSegment==0;
+    self.mobileUnread.hidden=!mobile || groups;
     CGFloat sh=NSHeight(self.sidebar.bounds), sideTop=mac ? 30 : (historic ? 35 : 82);
     self.groupFilter.hidden=mac || !groups; self.groupFilter.frame=NSMakeRect(historic ? 5 : 12,sh-(historic ? 61 : 116),rosterWidth-(historic ? 10 : 24),historic ? 22 : 29);
     self.onlineOnlyCheckbox.hidden=historic; self.favoritesOnlyCheckbox.hidden=historic;
@@ -1195,7 +1492,6 @@ static NSString *JMState(NSDictionary *contact) {
     CGFloat footer=historic ? (pro ? (notice ? 43 : 21) : (notice ? 74 : 49)) : (notice ? 94 : 62);
     CGFloat listTop=mac ? sh-36 : (historic ? sh-(groups ? 66 : 39) : sh-(groups ? 159 : 123)), listHeight=MAX(50,listTop-footer);
     self.contactTable.enclosingScrollView.frame=NSMakeRect(historic ? 4 : 0,footer,rosterWidth-(historic ? 8 : 0),listHeight);
-    self.emptyListLabel.frame=NSMakeRect(12,footer+MAX(0,(listHeight-100)/2),rosterWidth-24,MIN(100,listHeight));
     self.countLabel.frame=NSMakeRect(8,footer-19,rosterWidth-16,17); self.contactNotice.frame=NSMakeRect(8,pro ? 1 : 26,rosterWidth-16,historic ? 22 : 32); self.contactNotice.hidden=!notice;
     if (!pro) { self.addContactButton.frame=NSMakeRect(6,3,rosterWidth/2-10,historic ? 23 : 29); self.writeConversationButton.frame=NSMakeRect(rosterWidth/2+2,3,rosterWidth/2-8,historic ? 23 : 29); }
     if (historic) {
@@ -1212,6 +1508,9 @@ static NSString *JMState(NSDictionary *contact) {
     self.peerLabel.frame=mac ? NSMakeRect(14,ch-62,cw-109,24) : (pro ? NSMakeRect(8,ch-26,cw-198,19) : NSMakeRect(hasPeer ? 64 : 16,ch-35,hasPeer ? cw-270 : cw-32,24));
     self.peerDetail.frame=mac ? NSMakeRect(10,ch-120,cw-20,18) : (pro ? NSMakeRect(8,ch-48,cw-16,17) : NSMakeRect(hasPeer ? 64 : 16,ch-60,hasPeer ? cw-74-(self.addPeerButton.isHidden ? 0 : 180) : cw-32,19));
     self.peerDetail.hidden=pro; self.peerLabel.hidden=pro;
+    self.peerDetail.alignment=mac ? NSCenterTextAlignment : NSLeftTextAlignment;
+    self.peerDetail.font=mac ? [NSFont boldSystemFontOfSize:11] : [NSFont systemFontOfSize:11];
+    self.peerDetail.textColor=mac ? [NSColor colorWithSRGBRed:0.13 green:0.28 blue:0.42 alpha:1] : JMSecondaryTextColor();
     self.themeUINTitle.hidden=!pro; self.themeUINValue.hidden=!pro; self.themeNickTitle.hidden=!pro; self.themeNickValue.hidden=!pro; self.themeRecipientState.hidden=!pro;
     self.themeUINTitle.frame=NSMakeRect(6,ch-25,36,17); self.themeRecipientState.frame=NSMakeRect(46,ch-25,16,16); self.themeUINValue.frame=NSMakeRect(66,ch-25,128,19); self.themeNickTitle.frame=NSMakeRect(200,ch-25,30,17); self.themeNickValue.frame=NSMakeRect(236,ch-25,cw-292,19);
     self.peerLabel.font=JMThemeFont([NSFont boldSystemFontOfSize:historic ? (pro ? 11 : 15) : 16],@"");
@@ -1231,7 +1530,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.composer.enclosingScrollView.frame=NSMakeRect(historic ? 7 : 0,mac ? 36 : (pro ? 55 : 40),cw-(historic ? (mac ? 42 : 14) : 0),mac ? 54 : (pro ? 60 : 80));
     self.composerHint.frame=NSMakeRect(historic ? (pro ? 91 : 8) : 4,7,cw-(historic ? (pro ? 193 : 123) : 156),18);
     self.sendButton.frame=NSMakeRect(cw-(historic ? 100 : 134),historic ? 5 : 2,historic ? 93 : 134,historic ? 24 : 30);
-    self.themeCloseButton.frame=NSMakeRect(8,7,70,19); self.themeCloseButton.hidden=!pro; self.themeSendBar.hidden=!pro; self.themeSendBar.frame=NSMakeRect(4,3,cw-8,30); if (pro) { self.sendButton.frame=NSMakeRect(cw-92,7,83,19); self.composerHint.frame=NSMakeRect(119,8,cw-218,17); }
+    self.themeCloseButton.frame=NSMakeRect(8,7,70,19); self.themeCloseButton.hidden=!pro; self.themeSendBar.hidden=JMTheme()!=JMThemePro2003; self.themeSendBar.frame=NSMakeRect(4,3,cw-8,30); if (pro) { self.sendButton.frame=NSMakeRect(cw-92,7,83,19); self.composerHint.frame=NSMakeRect(119,8,cw-218,17); }
     self.themeSmileyButton.frame=mac ? NSMakeRect(cw-29,49,22,24) : NSMakeRect(105,117,25,20); self.themeSmileyButton.hidden=!historic;
     self.themeFontButton.frame=NSMakeRect(134,117,27,20); self.themeFontButton.hidden=!pro;
     self.themeComposerCount.frame=NSMakeRect(8,119,91,17); self.themeComposerCount.hidden=!pro;
@@ -1239,6 +1538,58 @@ static NSString *JMState(NSDictionary *contact) {
     self.latestMessagesButton.frame=NSMakeRect(cw-185,mac ? 92 : (pro ? 36 : 122),178,pro ? 18 : (mac ? 21 : 26));
     self.themeConversationTabs.frame=NSMakeRect(5,ch-28,cw-125,25); self.themeConversationTabs.hidden=!mac;
     self.themeConversationPicker.frame=NSMakeRect(cw-115,ch-27,109,23); self.themeConversationPicker.hidden=!mac;
+    self.mobileChatTitle.hidden=!mobile;
+    if (mobile) {
+        CGFloat rh=NSHeight([(NSView *)self.rosterWindow.contentView bounds]);
+        self.brandTitle.stringValue=groups ? JML(@"Список контактов") : JML(@"Переписки");
+        self.brandTitle.frame=NSMakeRect(32,39,rosterWidth-(red ? 64 : 40),21);
+        self.brandTitle.font=[NSFont boldSystemFontOfSize:15];
+        self.brandTitle.alignment=red ? NSCenterTextAlignment : NSLeftTextAlignment;
+        self.brandImage.frame=NSMakeRect(8,39,18,18);
+        self.accountLabel.frame=NSMakeRect(9,10,rosterWidth-166,20);
+        self.accountLabel.textColor=red ? JMThemeHeaderInk() : [NSColor colorWithSRGBRed:0.05 green:0.14 blue:0.25 alpha:1];
+        self.presencePopup.frame=NSMakeRect(rosterWidth-151,rh-59,143,23);
+        self.presencePopup.font=[NSFont systemFontOfSize:10];
+        self.reconnectButton.frame=self.presencePopup.frame;
+        self.presencePopup.hidden=!self.client.connected;
+        self.statusLabel.frame=NSMakeRect(8,mobileFooterHeight+4,rosterWidth-16,18);
+        self.presenceFeedback.frame=self.statusLabel.frame;
+        BOOL showPresence=self.client.connected && self.presenceFeedback.stringValue.length>0;
+        self.presenceFeedback.hidden=!showPresence; self.statusLabel.hidden=showPresence;
+        if (notice) { self.countLabel.frame=NSMakeRect(8,25,rosterWidth-16,17); self.contactNotice.frame=NSMakeRect(8,0,rosterWidth-16,24); }
+        self.mobileFooter.frame=NSMakeRect(0,0,rosterWidth,mobileFooterHeight);
+        self.mobileFooter.topColor=red ? JMThemeHeaderTop() : JMThemeBackground();
+        self.mobileFooter.bottomColor=self.mobileFooter.topColor;
+        CGFloat available=rosterWidth-16;
+        CGFloat settingsWidth=red ? floor(available/3) : 112;
+        CGFloat otherWidth=floor((available-settingsWidth)/2);
+        CGFloat buttonHeight=red ? 40 : 26;
+        self.mobileFind.frame=NSMakeRect(4,5,otherWidth,buttonHeight);
+        self.themeMainMenu.frame=NSMakeRect(8+otherWidth,5,otherWidth,buttonHeight);
+        self.mobileSettings.frame=NSMakeRect(12+otherWidth*2,5,settingsWidth,buttonHeight);
+        if (!groups) {
+            NSRect searchFrame=self.searchField.frame;
+            CGFloat filterHeight=22, gap=4;
+            CGFloat filterY=NSMinY(searchFrame)-gap-filterHeight;
+            self.mobileUnread.frame=NSMakeRect(NSMinX(searchFrame),filterY,NSWidth(searchFrame),filterHeight);
+            self.mobileUnread.state=self.unreadOnly ? NSOnState : NSOffState;
+            self.contactTable.enclosingScrollView.frame=NSMakeRect(4,footer,rosterWidth-8,MAX(0,filterY-gap-footer));
+        }
+        CGFloat titleInset=red ? 62 : 12;
+        self.mobileChatTitle.frame=NSMakeRect(titleInset,ch-26,cw-titleInset-62,20);
+        self.mobileChatTitle.alignment=red ? NSCenterTextAlignment : NSLeftTextAlignment;
+        self.mobileChatTitle.textColor=JMThemeHeaderInk();
+        JMSetLabel(self.mobileChatTitle,self.selectedPeer.length ? JMName(self.contacts[self.selectedPeer] ?: @{@"aimId":self.selectedPeer}) : JML(@"Переписки"));
+        self.themeUINTitle.hidden=YES; self.themeUINValue.hidden=YES; self.themeNickTitle.hidden=YES; self.themeNickValue.hidden=YES; self.themeRecipientState.hidden=YES;
+    } else {
+        self.brandTitle.alignment=JMTheme()==JMThemePro2003 ? NSCenterTextAlignment : NSLeftTextAlignment;
+        if (JMTheme()==JMThemePro2003) self.brandTitle.frame=NSMakeRect(29,27,rosterWidth-58,18);
+    }
+    NSRect listFrame=self.contactTable.enclosingScrollView.frame;
+    CGFloat emptyHeight=MIN(100,NSHeight(listFrame));
+    self.emptyListLabel.frame=NSMakeRect(12,floor(NSMidY(listFrame)-emptyHeight/2),rosterWidth-24,emptyHeight);
+    self.soundButton.hidden=mobile; self.logoutButton.hidden=mobile;
+    self.addContactButton.hidden=mobile; self.writeConversationButton.hidden=mobile;
     [self updateHistoricalTabs];
 }
 - (void)windowDidResize:(NSNotification *)notification { if (notification.object==self.chatWindow || notification.object==self.rosterWindow) [self layoutChatWindow]; if (notification.object==self.chatWindow && JMTheme()==JMThemeMac2011) [self renderTranscript]; }
@@ -1251,6 +1602,10 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)menuNeedsUpdate:(NSMenu *)menu {
     if (menu!=self.contactMenu) return;
+    if (![menu itemWithTitle:JML(@"Блокировка контакта…")]) {
+        NSMenuItem *block=[menu addItemWithTitle:JML(@"Блокировка контакта…") action:@selector(toggleContactBlock:) keyEquivalent:@""];
+        block.target=self;
+    }
     NSInteger row=self.contactTable.clickedRow;
     // A keyboard context menu acts on the selection. A mouse click in empty
     // space must not silently reuse the previously selected conversation.
@@ -1522,14 +1877,14 @@ static NSString *JMState(NSDictionary *contact) {
     NSView *view=self.appearancePreferencesView;
     [view addSubview:JMLabel(JML(@"Оформление"),NSMakeRect(24,234,100,22),13,YES)];
     self.appearancePopup=[[JMThemedPopUpButton alloc] initWithFrame:NSMakeRect(136,230,320,30) pullsDown:NO];
-    NSArray *titles=@[JML(@"Текущий JimmMac"),@"ICQ for Mac 2011",@"ICQ Pro 2003b"], *identifiers=@[@"current",@"mac2011",@"pro2003"];
+    NSArray *titles=@[JML(@"Текущий JimmMac"),@"ICQ for Mac 2011",@"ICQ Pro 2003b",@"QIP",@"Jimm"], *identifiers=JMThemeIdentifiers();
     for (NSUInteger i=0;i<titles.count;i++) { [self.appearancePopup addItemWithTitle:titles[i]]; self.appearancePopup.lastItem.representedObject=identifiers[i]; }
     self.appearancePopup.target=self; self.appearancePopup.action=@selector(appearancePreferencesChanged:); self.appearancePopup.toolTip=JML(@"Оформление применяется сразу; черновики сохраняются"); [view addSubview:self.appearancePopup];
     [view addSubview:JMLabel(JML(@"Список"),NSMakeRect(24,194,100,22),13,NO)];
     self.densityPopup=[[JMThemedPopUpButton alloc] initWithFrame:NSMakeRect(136,190,320,30) pullsDown:NO];
     [self.densityPopup addItemsWithTitles:@[JML(@"Обычный"),JML(@"Компактный")]]; self.densityPopup.target=self; self.densityPopup.action=@selector(appearancePreferencesChanged:); self.densityPopup.toolTip=JML(@"Компактный список показывает больше контактов"); [view addSubview:self.densityPopup];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(24,44,432,134)]; scroll.hasVerticalScroller=YES; scroll.borderType=NSBezelBorder;
-    self.appearancePreview=[[NSTextView alloc] initWithFrame:scroll.contentView.bounds]; self.appearancePreview.editable=NO; self.appearancePreview.selectable=YES; self.appearancePreview.textContainerInset=NSMakeSize(10,10); self.appearancePreview.autoresizingMask=NSViewWidthSizable; self.appearancePreview.textContainer.widthTracksTextView=YES; scroll.documentView=self.appearancePreview; [view addSubview:scroll];
+    self.appearancePreview=[[JMTranscriptView alloc] initWithFrame:scroll.contentView.bounds]; self.appearancePreview.editable=NO; self.appearancePreview.selectable=YES; self.appearancePreview.textContainerInset=NSMakeSize(10,10); self.appearancePreview.autoresizingMask=NSViewWidthSizable; self.appearancePreview.textContainer.widthTracksTextView=YES; scroll.documentView=self.appearancePreview; [view addSubview:scroll];
     [view addSubview:JMLabel(JML(@"Образец переписки · настройки сохраняются сразу"),NSMakeRect(24,12,432,22),11,NO)];
     self.appearanceResetButton=JMButton(JML(@"Стандартные настройки…"),NSMakeRect(14,13,244,32),self,@selector(resetPreferences:)); self.appearanceResetButton.toolTip=JML(@"Вернуть стандартные настройки без удаления истории и входа"); [root addSubview:self.appearanceResetButton];
     view=self.statusPreferencesView;
@@ -1549,7 +1904,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSFont *font=JMThemeFont(self.chatPreferences.messageFont,self.chatPreferences.family);
     NSMutableAttributedString *text=[[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@  12:34\n%@\n\n%@  12:35\n%@",JML(@"Собеседник"),JML(@"Привет! Рада снова видеть тебя :)"),JML(@"Вы"),JML(@"Привет из JimmMac! ;)" )] attributes:@{NSFontAttributeName:font,NSForegroundColorAttributeName:[NSColor textColor]}];
     if (self.chatPreferences.emoticonsEnabled) JMApplyEmoticons(text);
-    [self.appearancePreview.textStorage setAttributedString:text]; self.appearancePreview.backgroundColor=JMTheme()==JMThemeMac2011 ? [NSColor colorWithCalibratedRed:0.91 green:0.91 blue:0.87 alpha:1] : [NSColor whiteColor];
+    [self.appearancePreview.textStorage setAttributedString:text]; self.appearancePreview.backgroundColor=JMThemeTranscriptColor();
     self.fontPreview.attributedStringValue=[[NSAttributedString alloc] initWithString:JML(@"Привет из JimmMac! :)") attributes:@{NSFontAttributeName:font}];
     if (self.chatPreferences.emoticonsEnabled) { NSMutableAttributedString *sample=[self.fontPreview.attributedStringValue mutableCopy]; JMApplyEmoticons(sample); self.fontPreview.attributedStringValue=sample; }
 }
@@ -1854,6 +2209,14 @@ static NSString *JMState(NSDictionary *contact) {
     if (item.action==@selector(renameContact:) || item.action==@selector(removeContact:) || item.action==@selector(moveContact:)) return [self canChangeRoster] && [self.serverContactIDs containsObject:[self contactForAction:item]];
     if (item.action==@selector(writeContact:) || item.action==@selector(profileContact:)) return JMValidUIN([self contactForAction:item]);
     if (item.action==@selector(addContact:)) return [self canChangeRoster];
+    if (item.action==@selector(toggleUnreadFilter:)) { item.state=(self.unreadOnly && self.sectionControl.selectedSegment==1) ? NSOnState : NSOffState; return self.history!=nil; }
+    if (item.action==@selector(toggleSelectedGroup:)) return self.sectionControl.selectedSegment==0 && self.contactTable.selectedRow>=0 && !self.searchField.stringValue.length;
+    if (item.action==@selector(toggleContactBlock:)) {
+        NSString *peer=[self contactForAction:item];
+        return self.client.connected && !self.changingPrivacy && JMValidUIN(peer) && ![peer isEqual:self.accountUIN];
+    }
+    if (item.action==@selector(showBlockedContacts:)) return self.client.connected && !self.changingPrivacy;
+    if (item.action==@selector(restoreRecentMessages:)) return self.client.connected && self.history && !self.restoringMessages && JMValidUIN(self.selectedPeer);
     if (item.action==@selector(showStorage:) || item.action==@selector(showHistoryDay:) || item.action==@selector(showBookmarks:)) return self.history && !self.dataOperationInProgress;
     if (item.action==@selector(showGroups:)) return self.history!=nil;
     if (item.action==@selector(filterHistoricalGroup:)) return self.history!=nil;
@@ -1868,7 +2231,7 @@ static NSString *JMState(NSDictionary *contact) {
     if (item.action==@selector(changeLanguage:)) { item.state=[item.representedObject isEqual:[self.loginDefaults stringForKey:@"InterfaceLanguage"] ?: @"ru"] ? NSOnState : NSOffState; return !self.dataOperationInProgress; }
     if (item.action==@selector(changeAppearance:)) { item.state=[item.representedObject isEqual:JMThemeIdentifier()] ? NSOnState : NSOffState; return !self.dataOperationInProgress; }
     if (item.action==@selector(toggleAutomaticUpdates:)) { item.state=[self automaticUpdatesEnabled] ? NSOnState : NSOffState; return YES; }
-    if (item.action==@selector(checkForUpdates:)) return !self.checkingUpdates;
+    if (item.action==@selector(checkForUpdates:)) return !self.terminating;
     if (item.action==@selector(exportConversation:)) return !self.exportingHistory && self.selectedPeer.length && [self.history countForPeer:self.selectedPeer]>0;
     if (item.action==@selector(retryMessage:)) { NSDictionary *message=[self messageForAction:item]; return self.client.connected && !self.sending && self.sendNotBefore.timeIntervalSinceNow<=0 && [@[@"failed",@"unknown"] containsObject:JMString(message[@"delivery"])]; }
     if (item.action==@selector(toggleFavorite:)) { NSString *peer=[self contactForAction:item]; BOOL favorite=[self.favoritePeers containsObject:peer]; item.title=favorite ? JML(@"Убрать из избранного") : JML(@"Добавить в избранное"); item.state=favorite ? NSOnState : NSOffState; return self.history && JMValidUIN(peer); }
@@ -1889,7 +2252,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.rememberLoginCheckbox.enabled=NO; self.cancelLoginButton.hidden=NO; self.cancelLoginButton.enabled=YES;
 }
 - (BOOL)prepareLoginUIForUIN:(NSString *)uin {
-    self.loginAttemptSerial++;
+    self.loginAttemptSerial++; self.unreadOnly=NO; self.changingPrivacy=NO; self.restoringMessages=NO; self.restoreAfterReconnect=NO;
     [self.historyWindow orderOut:nil]; self.historySearchGeneration++; self.historyResults=@[]; [self.historyTable reloadData]; [self.historySearchField setStringValue:@""];
     self.offlineMode=NO; self.onlineOnlyCheckbox.enabled=YES;
     if ([self.presencePopup.lastItem.representedObject isEqual:@"offline-local"]) [self.presencePopup removeItemAtIndex:self.presencePopup.numberOfItems-1];
@@ -2024,11 +2387,14 @@ static NSString *JMState(NSDictionary *contact) {
     if (connected) { self.loginPending=NO; self.resumingLogin=NO; self.cancelLoginButton.hidden=YES; self.rememberLoginCheckbox.enabled=YES; self.notificationAlerts.accountUIN=self.accountUIN ?: client.uin; }
     if (connected && !self.wasConnected) self.connectedSince=[NSDate date];
     if (!connected) { self.connectedSince=nil; JMSetLabel(self.presenceFeedback,@""); }
+    if (!connected && self.wasConnected) self.restoreAfterReconnect=YES;
+    BOOL restore=connected && self.restoreAfterReconnect;
     self.wasConnected=connected;
     JMSetLabel(self.statusLabel,status); JMSetLabel(self.loginStatus,status); if (self.diagnosticsWindow.isVisible) [self refreshDiagnostics:nil];
     [self updateAccountLabel];
     if (connected && [self.loginWindow isVisible]) { [self.loginWindow orderOut:nil]; [self showSessionWindows]; }
     [self updateSendButton]; [self updateTypingIndicator];
+    if (restore) { self.restoreAfterReconnect=NO; [self restoreRecentMessages:nil]; }
     if (connected) { [self openPendingNotification]; [self presentPendingUpdateIfPossible]; }
 }
 - (void)updateAccountLabel {
@@ -2078,25 +2444,36 @@ static NSString *JMState(NSDictionary *contact) {
     if (changedAvatar) [self.avatars refreshUIN:peer];
 }
 - (BOOL)client:(JMAPIClient *)client receivedMessage:(NSDictionary *)message {
-    NSString *peer = message[@"peer"];
-    NSUInteger before = [self.history countForPeer:peer];
-    BOOL reading=[peer isEqualToString:self.selectedPeer] && [self isReadingConversation];
-    NSError *error = nil;
-    if (![self.history appendMessage:message unread:!reading error:&error]) {
-        if (!self.showedHistoryError) { self.showedHistoryError = YES; [self showError:JML(@"Не удалось сохранить историю") detail:[error localizedDescription]]; }
+    BOOL inserted=NO;
+    if (![self saveIncomingMessage:message quiet:NO inserted:&inserted]) return NO;
+    if (!inserted) return YES;
+    [self persistConversationPeers];
+    if ([message[@"peer"] isEqual:self.selectedPeer]) [self renderTranscript];
+    [self reloadContacts]; [self updateDockBadge]; return YES;
+}
+- (BOOL)saveIncomingMessage:(NSDictionary *)message quiet:(BOOL)quiet inserted:(BOOL *)inserted {
+    if (!self.history) return NO;
+    NSString *peer=message[@"peer"];
+    BOOL reading=[peer isEqual:self.selectedPeer] && [self isReadingConversation];
+    NSError *error=nil;
+    if (![self.history appendMessage:message unread:!reading inserted:inserted error:&error]) {
+        if (!self.showedHistoryError) { self.showedHistoryError=YES; [self showError:JML(@"Не удалось сохранить историю") detail:error.localizedDescription]; }
         return NO;
     }
-    if (!self.contacts[peer]) self.contacts[peer] = [@{@"aimId":peer, @"friendly":[JMString(message[@"name"]) length] ? message[@"name"] : peer, @"state":@"offline"} mutableCopy];
-    [self.conversationPeers addObject:peer]; [self persistConversationPeers];
-    BOOL isNew = [self.history countForPeer:peer] > before;
-    if ([peer isEqualToString:self.selectedPeer] && isNew) [self renderTranscript];
-    if (![message[@"outgoing"] boolValue] && isNew && !reading) self.unread[peer] = @([self.unread[peer] integerValue] + 1);
-    if (isNew && ![message[@"outgoing"] boolValue] && ![self.mutedPeers containsObject:peer]) {
+    if (!*inserted) return YES;
+    if (!self.contacts[peer]) {
+        NSString *name=JMString(message[@"name"]);
+        self.contacts[peer]=[@{@"aimId":peer,@"friendly":name.length ? name : peer,@"state":@"offline"} mutableCopy];
+    }
+    [self.conversationPeers addObject:peer];
+    BOOL incoming=![message[@"outgoing"] boolValue];
+    if (incoming && !reading) self.unread[peer]=@([self.unread[peer] integerValue]+1);
+    if (incoming && !quiet && ![self.mutedPeers containsObject:peer]) {
         if (!reading || self.audioAlerts.soundInOpenConversation) [self.audioAlerts playEvent:@"message"];
         if (!reading) [self.notificationAlerts queueMessageFrom:peer name:JMName(self.contacts[peer]) text:JMString(message[@"text"])];
         if (!reading && self.notificationAlerts.dockAttentionEnabled && ![NSApp isActive]) [NSApp requestUserAttention:NSInformationalRequest];
     }
-    [self reloadContacts]; [self updateDockBadge]; return YES;
+    return YES;
 }
 - (BOOL)isReadingConversation {
     NSClipView *clip=self.transcript.enclosingScrollView.contentView;
@@ -2161,6 +2538,7 @@ static NSString *JMState(NSDictionary *contact) {
     BOOL conversations = [self.sectionControl selectedSegment] == 1;
     NSSet *ids = conversations ? self.conversationPeers : self.serverContactIDs;
     for (NSString *peer in ids) {
+        if (conversations && self.unreadOnly && ![self.unread[peer] integerValue]) continue;
         NSDictionary *contact = self.contacts[peer] ?: @{@"aimId":peer, @"friendly":peer, @"state":@"offline"};
         if (self.onlineOnlyCheckbox.state==NSOnState && ![@[@"online",@"freeForChat",@"away",@"na",@"dnd",@"occupied"] containsObject:JMString(contact[@"state"])]) continue;
         if (self.favoritesOnlyCheckbox.state==NSOnState && ![self.favoritePeers containsObject:peer]) continue;
@@ -2170,7 +2548,12 @@ static NSString *JMState(NSDictionary *contact) {
     [contacts sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         BOOL favoriteA=[self.favoritePeers containsObject:a[@"aimId"]],favoriteB=[self.favoritePeers containsObject:b[@"aimId"]];
         if (favoriteA!=favoriteB) return favoriteA ? NSOrderedAscending : NSOrderedDescending;
-        if (JMTheme()!=JMThemeCurrent && !conversations) { NSComparisonResult group=[[self historicalGroupForContact:a] localizedCaseInsensitiveCompare:[self historicalGroupForContact:b]]; if (group!=NSOrderedSame) return group; }
+        if (!conversations) {
+            NSString *aGroup=[self historicalGroupForContact:a], *bGroup=[self historicalGroupForContact:b];
+            NSComparisonResult group=[aGroup localizedCaseInsensitiveCompare:bGroup];
+            if (group!=NSOrderedSame) return group;
+            if (![aGroup isEqual:bGroup]) return [aGroup compare:bGroup];
+        }
         if (conversations) {
             NSDictionary *lastA = [self.history lastMessageForPeer:a[@"aimId"]];
             NSDictionary *lastB = [self.history lastMessageForPeer:b[@"aimId"]];
@@ -2182,15 +2565,36 @@ static NSString *JMState(NSDictionary *contact) {
         if (aOnline != bOnline) return aOnline ? NSOrderedAscending : NSOrderedDescending;
         return [JMName(a) localizedCaseInsensitiveCompare:JMName(b)];
     }];
+    NSUInteger contactCount=contacts.count;
+    NSMutableDictionary *totals=[NSMutableDictionary dictionary], *online=[NSMutableDictionary dictionary], *counts=[NSMutableDictionary dictionary];
+    if (!conversations) {
+        for (NSDictionary *contact in contacts) {
+            NSString *group=[self historicalGroupForContact:contact];
+            totals[group]=@([totals[group] integerValue]+1);
+            if (![JMState(contact) isEqual:JML(@"Не в сети")]) online[group]=@([online[group] integerValue]+1);
+        }
+        for (NSString *group in totals) counts[group]=[NSString stringWithFormat:@"%ld/%ld",(long)[online[group] integerValue],(long)[totals[group] integerValue]];
+        NSArray *collapsed=query.length ? @[] : ([self.loginDefaults arrayForKey:[self collapsedGroupsKey]] ?: @[]);
+        NSMutableSet *represented=[NSMutableSet set];
+        NSMutableArray *rows=[NSMutableArray arrayWithCapacity:contacts.count];
+        for (NSDictionary *contact in contacts) {
+            NSString *group=[self historicalGroupForContact:contact];
+            if (![collapsed containsObject:group]) [rows addObject:contact];
+            else if (![represented containsObject:group]) { [rows addObject:@{@"_collapsedGroup":group,@"aimId":@""}]; [represented addObject:group]; }
+        }
+        contacts=rows;
+    }
+    self.visibleGroupCounts=counts;
     self.visibleContacts = contacts; self.reloadingContacts = YES; [self.contactTable reloadData];
     NSInteger selected = -1;
     for (NSUInteger i = 0; i < [contacts count]; i++) if ([contacts[i][@"aimId"] isEqual:selectionPeer]) { selected = (NSInteger)i; break; }
     if (selected >= 0) [self.contactTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)selected] byExtendingSelection:NO];
     else [self.contactTable deselectAll:nil];
     self.reloadingContacts = NO;
-    [self.countLabel setStringValue:[NSString stringWithFormat:@"%@: %lu", conversations ? JML(@"Переписок") : JML(@"Контактов"), (unsigned long)[contacts count]]];
+    [self.countLabel setStringValue:[NSString stringWithFormat:@"%@: %lu", conversations ? JML(@"Переписок") : JML(@"Контактов"), (unsigned long)contactCount]];
     NSString *empty = [query length] ? JML(@"Ничего не найдено.\nПопробуйте другое имя или UIN.") : (conversations ? JML(@"Переписок пока нет.\nВыберите контакт или нажмите «Написать…».") : (self.selectedGroup.length ? JML(@"В этой группе пока нет контактов.\nДобавьте контакт или перенесите его из другой группы.") : JML(@"Контактов пока нет.\nНажмите «Добавить…», чтобы сохранить UIN на сервере.")));
     if (!contacts.count && (self.onlineOnlyCheckbox.state==NSOnState || self.favoritesOnlyCheckbox.state==NSOnState)) empty=JML(@"По выбранным фильтрам никого нет.\nОтключите «Только в сети» или «Избранные».");
+    if (!contacts.count && conversations && self.unreadOnly) empty=JML(@"Нет непрочитанных сообщений.");
     [self.emptyListLabel setStringValue:empty]; [self.emptyListLabel setHidden:[contacts count] > 0];
     [self layoutChatWindow];
 }
@@ -2207,6 +2611,7 @@ static NSString *JMState(NSDictionary *contact) {
 - (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
     if (tableView==self.historyTable) return JMString(self.historyResults[(NSUInteger)row][@"text"]);
     NSDictionary *contact = self.visibleContacts[(NSUInteger)row]; NSString *peer = contact[@"aimId"];
+    if (contact[@"_collapsedGroup"]) return [self historicalHeaderForRow:row];
     NSInteger unread = [self.unread[peer] integerValue];
     NSString *name = [NSString stringWithFormat:@"%@%@", JMName(contact), unread ? [NSString stringWithFormat:@" (%ld)", (long)unread] : @""];
     NSString *state = [NSString stringWithFormat:@"%@ · %@", JMState(contact), peer];
@@ -2231,6 +2636,9 @@ static NSString *JMState(NSDictionary *contact) {
     JMListCell *cell = [tableView makeViewWithIdentifier:@"person" owner:self];
     if (!cell) { cell = [[JMListCell alloc] initWithFrame:NSMakeRect(0,0,NSWidth([tableView bounds]),54)]; [cell setIdentifier:@"person"]; }
     NSDictionary *contact = self.visibleContacts[(NSUInteger)row]; NSString *peer = contact[@"aimId"];
+    cell.groupTitle=[self historicalHeaderForRow:row];
+    cell.groupOnly=contact[@"_collapsedGroup"]!=nil;
+    if (cell.groupOnly) { cell.toolTip=JML(@"Нажмите, чтобы развернуть группу."); cell.textField.stringValue=cell.groupTitle; return cell; }
     NSString *detail = [NSString stringWithFormat:@"%@ · %@", JMState(contact), peer];
     if ([self.sectionControl selectedSegment] == 1) {
         NSDictionary *last = [self.history lastMessageForPeer:peer];
@@ -2241,7 +2649,6 @@ static NSString *JMState(NSDictionary *contact) {
         detail = [detail stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
     }
     if (JMTheme()==JMThemeMac2011 && self.sectionControl.selectedSegment==0) detail=JMString(contact[@"statusMsg"]);
-    cell.groupTitle=[self historicalHeaderForRow:row];
     [cell configureName:[self.favoritePeers containsObject:peer] ? [@"★ " stringByAppendingString:JMName(contact)] : JMName(contact) detail:detail state:JMString(contact[@"state"]) unread:[self.unread[peer] integerValue]];
     if (self.sectionControl.selectedSegment==1) {
         NSDictionary *last=[self.history lastMessageForPeer:peer];
@@ -2273,7 +2680,7 @@ static NSString *JMState(NSDictionary *contact) {
     if (navigatingList) [self.chatWindow makeFirstResponder:self.contactTable];
 }
 - (void)selectPeer:(NSString *)peer {
-    if (self.dataOperationInProgress) return;
+    if (self.dataOperationInProgress || !JMValidUIN(peer)) return;
     self.highlightedMessageID=nil; self.historyHighlightQuery=nil;
     if (self.selectedPeer && ![self.selectedPeer isEqualToString:peer]) [self stopOutgoingTyping];
     if (self.selectedPeer) [self rememberDraftForPeer:self.selectedPeer text:self.composer.string];
@@ -2301,7 +2708,7 @@ static NSString *JMState(NSDictionary *contact) {
     if ([self.mutedPeers containsObject:self.selectedPeer ?: @""]) self.peerDetail.stringValue=[self.peerDetail.stringValue stringByAppendingString:JML(@" · Без уведомлений")];
     [self.addPeerButton setHidden:!contact || [self.serverContactIDs containsObject:self.selectedPeer]];
     self.themeUINValue.stringValue=self.selectedPeer ?: @""; self.themeNickValue.stringValue=contact ? JMName(contact) : @""; self.themeUINValue.toolTip=self.themeUINValue.stringValue; self.themeNickValue.toolTip=self.themeNickValue.stringValue; self.themeRecipientState.image=JMStatusImage(contact[@"state"]); self.themeRecipientState.toolTip=JMState(contact);
-    [self.peerAvatar setImage:[self.avatars imageForUIN:self.selectedPeer] ?: [NSImage imageNamed:NSImageNameUser]];
+    [self.peerAvatar setImage:[self.avatars imageForUIN:self.selectedPeer] ?: (JMTheme()==JMThemeMac2011 ? JMRetroImage(@"avatar") : nil) ?: [NSImage imageNamed:NSImageNameUser]];
     [self.peerLabel setToolTip:self.peerLabel.stringValue]; [self.peerDetail setToolTip:self.peerDetail.stringValue];
     [self.profileButton setEnabled:contact!=nil];
     self.profileButton.hidden=!contact; self.historySearchButton.hidden=!contact; self.peerAvatar.hidden=!contact;
@@ -2413,6 +2820,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.historySearchButton setEnabled:self.history!=nil];
     [self.presenceFeedback setHidden:!self.client.connected];
     self.statusLabel.hidden=JMTheme()!=JMThemeCurrent && self.client.connected && self.presenceFeedback.stringValue.length>0;
+    if (JMThemeIsMobile()) self.presencePopup.hidden=!self.client.connected;
     [self.reconnectButton setHidden:self.client.connected]; [self.reconnectButton setEnabled:!self.client.connected && !self.dataOperationInProgress];
     [self.addContactButton setEnabled:[self canChangeRoster]];
     [self.addContactButton setTitle:self.addingContact ? JML(@"Добавляем…") : JML(@"Добавить…")];
@@ -2664,7 +3072,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.profileDetail setStringValue:[NSString stringWithFormat:@"UIN %@ · %@",self.profilePeer,JMState(person)]];
     NSString *status=JMString(person[@"statusMsg"]); [self.profileStatus setStringValue:status.length ? status : JML(@"Статус без подписи")];
     [self.profileStatus setToolTip:self.profileStatus.stringValue]; [self.profileDetail setToolTip:self.profileDetail.stringValue];
-    [self.profileAvatar setImage:[self.avatars imageForUIN:self.profilePeer] ?: [NSImage imageNamed:NSImageNameUser]];
+    [self.profileAvatar setImage:[self.avatars imageForUIN:self.profilePeer] ?: (JMTheme()==JMThemeMac2011 ? JMRetroImage(@"avatar") : nil) ?: [NSImage imageNamed:NSImageNameUser]];
     if (self.profileTexts[self.profilePeer]) [self.profileAbout setString:self.profileTexts[self.profilePeer]];
 }
 - (void)showProfile:(id)sender {
@@ -2702,7 +3110,7 @@ static NSString *JMState(NSDictionary *contact) {
     if (!self.changingPresence && !self.automaticPresenceRequest && state.length && ![state isEqual:(self.autoAway.automaticallyAway ? @"away" : self.autoAway.manualPresence)]) [self.autoAway manualPresenceChanged:state];
     for (NSMenuItem *item in [self.presencePopup itemArray]) if ([[item representedObject] isEqualToString:state]) { [self.presencePopup selectItem:item]; break; }
     [self updateAccountLabel];
-    if (JMTheme()==JMThemeMac2011) { self.brandImage.image=[self.avatars imageForUIN:self.accountUIN] ?: [NSImage imageNamed:NSImageNameUser]; self.brandSubtitle.stringValue=JMString(self.ownInfo[@"statusMsg"]).length ? self.ownInfo[@"statusMsg"] : @"Jimm.online"; }
+    if (JMTheme()==JMThemeMac2011) { self.brandImage.image=[self.avatars imageForUIN:self.accountUIN] ?: JMRetroImage(@"avatar") ?: [NSImage imageNamed:NSImageNameUser]; self.brandSubtitle.stringValue=JMString(self.ownInfo[@"statusMsg"]).length ? self.ownInfo[@"statusMsg"] : @"Jimm.online"; }
     [self persistRosterCache];
 }
 - (void)showOwnProfile:(id)sender {

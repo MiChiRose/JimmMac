@@ -37,6 +37,9 @@
 - (void)uploadOwnAvatar:(NSData *)jpeg completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)setPresenceState:(NSString *)state completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)setTypingStatus:(NSString *)status forUIN:(NSString *)uin;
+- (void)fetchPrivacy:(void (^)(NSDictionary *, NSError *))completion;
+- (void)setBlocked:(BOOL)blocked peer:(NSString *)peer enableDenyMode:(BOOL)enableMode completion:(void (^)(NSDictionary *, NSError *))completion;
+- (void)fetchStoredMessagesForPeer:(NSString *)peer completion:(void (^)(NSDictionary *, NSError *))completion;
 - (NSArray *)diagnosticSnapshot;
 - (BOOL)usesLegacyTransport;
 - (void)reconnect;

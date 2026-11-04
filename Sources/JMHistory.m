@@ -178,6 +178,10 @@ static void Contains(sqlite3_context *context,int argc,sqlite3_value **values) {
 }
 - (BOOL)appendMessage:(NSDictionary *)message error:(NSError **)error { return [self appendMessage:message unread:NO error:error]; }
 - (BOOL)appendMessage:(NSDictionary *)message unread:(BOOL)unread error:(NSError **)error {
+    return [self appendMessage:message unread:unread inserted:NULL error:error];
+}
+- (BOOL)appendMessage:(NSDictionary *)message unread:(BOOL)unread inserted:(BOOL *)inserted error:(NSError **)error {
+    if (inserted) *inserted=NO;
     if (self.loadError) { if (error) *error=self.loadError; return NO; }
     NSString *peer=JMString(message[@"peer"]), *identifier=JMString(message[@"id"]);
     if (!JMValidUIN(peer) || !identifier.length || ![message[@"id"] isKindOfClass:[NSString class]] || ![message[@"text"] isKindOfClass:[NSString class]] || ![message[@"outgoing"] isKindOfClass:[NSNumber class]] || !([message[@"timestamp"] isKindOfClass:[NSNumber class]] || [message[@"timestamp"] isKindOfClass:[NSString class]])) { if (error) *error=HistoryError(); return NO; }
@@ -185,6 +189,7 @@ static void Contains(sqlite3_context *context,int argc,sqlite3_value **values) {
     NSData *data=[NSJSONSerialization dataWithJSONObject:canonical options:0 error:error]; if (!data) return NO;
     sqlite3_stmt *s=NULL; BOOL ok=sqlite3_prepare_v2(_database,"INSERT OR IGNORE INTO messages(peer,id,ts,outgoing,unread,state,text,payload) VALUES(?,?,?,?,?,?,?,?)",-1,&s,NULL)==SQLITE_OK;
     if (ok) { Bind(s,1,peer); Bind(s,2,identifier); sqlite3_bind_double(s,3,timestamp); sqlite3_bind_int(s,4,[message[@"outgoing"] boolValue]); sqlite3_bind_int(s,5,unread && ![message[@"outgoing"] boolValue]); Bind(s,6,JMString(message[@"delivery"]).length ? message[@"delivery"] : ([message[@"outgoing"] boolValue] ? @"accepted" : @"")); Bind(s,7,message[@"text"]); Bind(s,8,[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]); ok=sqlite3_step(s)==SQLITE_DONE; }
+    if (ok && inserted) *inserted=sqlite3_changes(_database)>0;
     sqlite3_finalize(s); if (!ok && error) *error=HistoryError(); return ok;
 }
 - (NSDictionary *)unreadCounts {

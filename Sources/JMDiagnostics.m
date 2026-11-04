@@ -2,8 +2,8 @@
 #import "JMLocalization.h"
 #import <math.h>
 NSArray *JMSafeDiagnosticEntries(NSArray *entries) {
-    NSSet *paths=[NSSet setWithArray:@[@"/auth/clientLogin",@"/auth/getInfo",@"/aim/startSession",@"/aim/fetchEvents",@"/aim/endSession",@"/im/sendIM",@"/im/setTyping",@"/presence/get",@"/presence/setState",@"/buddylist/getBuddyList",@"/buddylist/moveBuddy",@"/buddylist/addBuddy",@"/buddylist/removeBuddy",@"/buddylist/setBuddyAttribute",@"/buddylist/addGroup",@"/buddylist/removeGroup",@"/buddylist/renameGroup",@"/memberDir/update",@"/presence/getProfile",@"/presence/setProfile",@"/presence/setStatus",@"/memberDir/get",@"/memberDir/set",@"/aim/getProfile",@"/aim/setProfile",@"/expressions/upload"]];
-    NSSet *domains=[NSSet setWithArray:@[@"",NSURLErrorDomain,@"online.jimm.api",@"online.jimm.http",NSCocoaErrorDomain,NSPOSIXErrorDomain,@"kCFErrorDomainCFNetwork"]];
+    NSSet *paths=[NSSet setWithArray:@[@"/auth/clientLogin",@"/auth/getInfo",@"/aim/startSession",@"/aim/fetchEvents",@"/aim/endSession",@"/im/sendIM",@"/im/setTyping",@"/imlog/fetchStoredIMs",@"/preference/getPermitDeny",@"/preference/setPermitDeny",@"/presence/get",@"/presence/setState",@"/buddylist/getBuddyList",@"/buddylist/moveBuddy",@"/buddylist/addBuddy",@"/buddylist/removeBuddy",@"/buddylist/setBuddyAttribute",@"/buddylist/addGroup",@"/buddylist/removeGroup",@"/buddylist/renameGroup",@"/memberDir/update",@"/presence/getProfile",@"/presence/setProfile",@"/presence/setStatus",@"/memberDir/get",@"/memberDir/set",@"/aim/getProfile",@"/aim/setProfile",@"/expressions/upload"]];
+    NSSet *domains=[NSSet setWithArray:@[@"",NSURLErrorDomain,@"online.jimm.api",@"online.jimm.mavericks.api",@"online.jimm.http",NSCocoaErrorDomain,NSPOSIXErrorDomain,@"kCFErrorDomainCFNetwork"]];
     NSMutableArray *safe=[NSMutableArray array];
     for (id value in entries) {
         if (![value isKindOfClass:[NSDictionary class]] || ![paths containsObject:value[@"endpoint"]]) continue;
@@ -17,7 +17,7 @@ NSArray *JMSafeDiagnosticEntries(NSArray *entries) {
 }
 NSString *JMDiagnosticReport(NSDictionary *bundle,NSString *system,NSString *connection,BOOL legacy,NSArray *entries) {
     NSString *state=[@[@"connected",@"offline"] containsObject:connection] ? connection : @"disconnected";
-    NSMutableString *report=[NSMutableString stringWithFormat:@"JimmMac %@ (%@)\nOS: %@\nArchitecture: Intel x86_64\nConnection: %@\nTransport: %@\n\n",bundle[@"CFBundleShortVersionString"] ?: @"0.15.0",bundle[@"CFBundleVersion"] ?: @"24",system,state,legacy ? @"NSURLConnection" : @"NSURLSession"];
+    NSMutableString *report=[NSMutableString stringWithFormat:@"JimmMac %@ (%@)\nOS: %@\nArchitecture: Intel x86_64\nConnection: %@\nTransport: %@\n\n",bundle[@"CFBundleShortVersionString"] ?: @"0.16.0",bundle[@"CFBundleVersion"] ?: @"25",system,state,legacy ? @"NSURLConnection" : @"NSURLSession"];
     [report appendFormat:@"%@\n",JML(@"Отчёт не содержит UIN, имён, паролей, токенов и переписки.")];
     NSArray *safe=JMSafeDiagnosticEntries(entries); NSDictionary *lastFailure=nil;
     for (NSDictionary *row in safe) if ([row[@"errorCode"] integerValue] || [row[@"http"] integerValue]>=400 || [row[@"api"] integerValue]>=400) lastFailure=row;
