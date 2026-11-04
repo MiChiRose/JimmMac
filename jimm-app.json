@@ -4,20 +4,21 @@
   "id": "jimm-mac",
   "name": "JimmMac",
   "summary": "Нативный ICQ-клиент Jimm.online для Intel Mac с OS X 10.8–macOS 10.13",
-  "description": "JimmMac возвращает переписку по UIN на старые Intel Mac. Есть контакты и группы, аватары, уведомления, поиск по истории, закладки и офлайн-доступ к переписке. Локальную историю можно экспортировать и переносить в резервной копии.\n\nИнтерфейс на русском и английском. Доступны три оформления: JimmMac, ICQ для Mac 2011 и ICQ Pro 2003b. Сборка проверена на OS X 10.9.5 Mavericks. Остальные версии в целевом диапазоне ждут проверки на реальных системах.",
+  "description": "JimmMac возвращает переписку по UIN на старые Intel Mac. Есть контакты и группы, аватары, уведомления, поиск по истории, закладки и офлайн-доступ к переписке. Локальную историю можно экспортировать и переносить в резервной копии.\n\nКонтакты можно блокировать, а переписки фильтровать по непрочитанным. Интерфейс доступен на русском, английском, украинском и белорусском. Пять оформлений: JimmMac, ICQ для Mac 2011, ICQ Pro 2003b, QIP и Jimm. В темах QIP и Jimm воспроизводится анимация классических смайликов. Сборка проверена на OS X 10.9.5 Mavericks. Остальные версии в целевом диапазоне ждут проверки на реальных системах.",
   "icon": "https://raw.githubusercontent.com/MiChiRose/JimmMac/main/Resources/JimmStoreIcon.png",
   "screenshots": [
     "https://raw.githubusercontent.com/MiChiRose/JimmMac/v0.15.0/screenshots/UI-chat-polished.png",
+    "https://raw.githubusercontent.com/MiChiRose/JimmMac/main/screenshots/UI-016-qip-preferences.png",
+    "https://raw.githubusercontent.com/MiChiRose/JimmMac/main/screenshots/UI-016-jimm-preferences.png",
     "https://raw.githubusercontent.com/MiChiRose/JimmMac/v0.15.0/screenshots/UI-mac2011-conversation.png",
-    "https://raw.githubusercontent.com/MiChiRose/JimmMac/v0.15.0/screenshots/UI-pro2003-conversation.png",
-    "https://raw.githubusercontent.com/MiChiRose/JimmMac/v0.15.0/screenshots/UI-preferences-appearance.png"
+    "https://raw.githubusercontent.com/MiChiRose/JimmMac/v0.15.0/screenshots/UI-pro2003-conversation.png"
   ],
   "category": "client",
   "developer": {
     "name": "Юра Менщиков",
     "url": "https://github.com/MiChiRose"
   },
-  "homepage": "https://github.com/MiChiRose/JimmMac",
+  "homepage": "https://github.com/MiChiRose/JimmMac/releases/latest",
   "platforms": [
     {
       "os": "macos",
