@@ -5,10 +5,22 @@ BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build}"
 PROFILE="${1:-legacy}"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 APP="$BUILD_DIR/JimmMac.app"
+REVISION="${JIMMMAC_SOURCE_REVISION:-}"
 case "$PROFILE" in
     legacy|modern) ;;
     *) echo 'Usage: bash scripts/build.sh [legacy|modern]' >&2; exit 2 ;;
 esac
+if command -v git >/dev/null &&
+   [[ "$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel 2>/dev/null || true)" == "$PROJECT_ROOT" ]]; then
+    [[ -z "$REVISION" ]] || { echo 'Use JIMMMAC_SOURCE_REVISION only with a source archive.' >&2; exit 2; }
+    if [[ -z "$(git -C "$PROJECT_ROOT" status --porcelain)" ]]; then
+        REVISION="$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
+    fi
+fi
+if [[ -n "$REVISION" && ! "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+    echo 'Expected a full Git commit SHA' >&2
+    exit 2
+fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 build_slice() {
     local arch="$1" minimum="$2" binary="$3"
@@ -30,6 +42,9 @@ else
     build_slice x86_64 10.8 "$APP/Contents/MacOS/JimmMac"
 fi
 cp "$PROJECT_ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+if [[ -n "$REVISION" ]]; then
+    /usr/libexec/PlistBuddy -c "Add :JimmMacSourceRevision string $REVISION" "$APP/Contents/Info.plist"
+fi
 cp "$PROJECT_ROOT/Resources/ICQFlower.png" "$PROJECT_ROOT/Resources/JimmMac.icns" "$APP/Contents/Resources/"
 cp "$PROJECT_ROOT/Resources/SectigoPublicServerAuthenticationRootE46.der" "$PROJECT_ROOT/Resources/USERTrustECCCertificationAuthority.der" "$APP/Contents/Resources/"
 cp "$PROJECT_ROOT/Resources/JimmStatusSprite.png" "$APP/Contents/Resources/"

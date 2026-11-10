@@ -17,7 +17,7 @@ case "$MINIMUM:$ARCHS" in
     '10.13:x86_64 arm64'|'10.13:arm64 x86_64')
         [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersionByArchitecture:x86_64' "$APP/Contents/Info.plist")" == 10.13 ]]
         [[ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersionByArchitecture:arm64' "$APP/Contents/Info.plist")" == 11.0 ]]
-        codesign --verify --strict "$APP"
+        codesign --verify --strict --all-architectures "$APP"
         SUFFIX='macos10.13plus-universal'
         ;;
     *) echo "Unsupported deployment target or architectures: $MINIMUM ($ARCHS)" >&2; exit 1 ;;
