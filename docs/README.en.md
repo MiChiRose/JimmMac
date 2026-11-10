@@ -3,10 +3,9 @@
   <h1>JimmMac</h1>
   <p><b>A familiar flower. An older Mac. A new conversation.</b></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.16.0-5a9638" alt="Version 0.16.0" />
+    <img src="https://img.shields.io/badge/version-0.17.0-5a9638" alt="Version 0.17.0" />
     <img src="https://img.shields.io/badge/status-public%20testing-d59b35" alt="Public testing" />
-    <img src="https://img.shields.io/badge/OS%20X-10.8%E2%80%9310.13-silver" alt="Target: OS X 10.8 through macOS 10.13" />
-    <img src="https://img.shields.io/badge/architecture-Intel%20x86__64-687b8c" alt="Intel x86_64" />
+    <img src="https://img.shields.io/badge/architecture-Intel%20%2B%20Apple%20Silicon-687b8c" alt="Intel + Apple Silicon" />
   </p>
   <p>
     <a href="https://github.com/MiChiRose/JimmMac/releases/latest"><b>Download JimmMac</b></a>
@@ -19,12 +18,9 @@
 
 JimmMac is an independent client for [Jimm.online](https://jimm.online), a service
 reviving ICQ-style messaging. It brings UIN sign-in, contacts and everyday text
-conversations to older Intel Macs, with native AppKit controls, silver panels,
-the green ICQ flower and familiar message sounds.
-
-The interface is available in Russian and English. The application is written in Objective-C
-and uses one Intel build targeting **OS X 10.8 Mountain Lion through macOS 10.13
-High Sierra**. It is an independent project, not an official ICQ application.
+conversations to Intel and Apple silicon Macs, with classic AppKit themes,
+the green ICQ flower and familiar message sounds. The interface is available
+in Russian, English, Ukrainian and Belarusian.
 
 <p align="center">
   <img src="../screenshots/UI-chat-polished.png" alt="JimmMac conversation on OS X Mavericks, using fictional contacts and messages" width="900" />
@@ -35,14 +31,15 @@ High Sierra**. It is an independent project, not an official ICQ application.
 
 | Download | What to choose |
 | --- | --- |
-| [0.16.0 DMG installer](https://github.com/MiChiRose/JimmMac/releases/download/v0.16.0/JimmMac-0.16.0-macos10.8-10.13-x86_64.dmg) | Open the image and drag JimmMac into Applications. |
-| [0.16.0 application ZIP](https://github.com/MiChiRose/JimmMac/releases/download/v0.16.0/JimmMac-0.16.0-macos10.8-10.13-x86_64.zip) | The same application in a ZIP archive. |
-| [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.16.0) | Read about this version and verify your download. |
+| [Universal DMG 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.dmg) | Intel on macOS 10.13 or later, Apple silicon on macOS 11 or later. |
+| [Universal ZIP 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.zip) | The same application in a ZIP archive. |
+| [Legacy Intel DMG 0.16.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.16.0/JimmMac-0.16.0-macos10.8-10.13-x86_64.dmg) | For older Intel Macs targeting OS X 10.8–macOS 10.13. |
+| [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.17.0) | Changes and checksums for 0.17.0. |
 
-Launch JimmMac from **Applications in Finder**. When updating, quit JimmMac before
-replacing it; keep your existing application data and settings. The application
-is not Developer ID signed or notarized. If Gatekeeper blocks the first launch,
-Control-click JimmMac and choose **Open**.
+Open the DMG and drag JimmMac into Applications. Quit the running app before
+replacing it. Version 0.17.0 is a public testing build with an ad hoc signature.
+If macOS blocks the first launch, allow the app in Privacy & Security.
+[Apple instructions](https://support.apple.com/en-us/102445).
 
 Use a **Jimm.online UIN and password** to sign in. If you need an account, start at
 [Jimm.online](https://jimm.online). Enable **«Запомнить меня»** to restore your login
@@ -74,6 +71,13 @@ after restarting the application.
 </p>
 
 </details>
+
+## New in 0.17.0
+
+- Universal build for Intel and Apple silicon.
+- Pin chats and jump to the next unread conversation with **⌘U**.
+- Jump to a conversation by name or UIN with **⌘K**.
+- Reconnection status in the chat window and manual resend with confirmation.
 
 ## New in 0.16.0
 
@@ -202,17 +206,14 @@ the full target range.
 
 ## Compatibility and testing
 
-| System | Current verification |
+| Build | Verification |
 | --- | --- |
-| OS X 10.8 Mountain Lion | Build targets 10.8; fallback network path tested on Mavericks. A real 10.8 test is still needed. |
-| OS X 10.9 Mavericks | Tested on **10.9.5**, including installation, saved login, sending and automatic message reception. |
-| OS X 10.10–macOS 10.13 | Within the target range; tests on these systems are still needed. |
+| 0.17.0 for Apple silicon | Launch and focused UI checks on **macOS 27.2**. Requires macOS 11 or later. |
+| 0.17.0 for Intel | Intel code launched under Rosetta on macOS 27.2. Requires macOS 10.13 or later. |
+| 0.16.0 for older Intel Macs | Installation, saved login, and sending and receiving messages verified on **OS X 10.9.5**. |
 
-Version 0.16.0 is a **public testing build**. See [VALIDATION.md](../VALIDATION.md)
-for the Mavericks test results. The application was built with Xcode 5.1.1
-and the 10.9 SDK, with a minimum system of 10.8.
-Build compatibility does not replace testing on each actual system; differences
-in system TLS, certificates and rendering may still matter.
+Testing on physical Intel Macs with 10.13 or later is still pending.
+See [VALIDATION.md](../VALIDATION.md) for coverage and limitations.
 
 If you test it, please [open an issue](https://github.com/MiChiRose/JimmMac/issues)
 with your OS version, JimmMac version, what you did and what happened. Installation,
@@ -234,20 +235,16 @@ previews can be adjusted in Settings.
 
 ## Build and explore
 
-The repository includes the application source, resources and tests. The verified
-build environments are Xcode 5.1.1 / SDK 10.9 and Xcode 6.2 / SDK 10.10 on Mavericks.
-Current Xcode versions do not include the legacy ARC support needed for this
-deployment target.
+On a current Mac with Xcode Command Line Tools, build the Universal app and run
+the native tests.
 
 ```sh
-git clone https://github.com/MiChiRose/JimmMac.git
-cd JimmMac
-bash scripts/test.sh
-bash scripts/build.sh
+bash scripts/build.sh modern
+JIMMMAC_NATIVE_TESTS=1 bash scripts/test.sh
 ```
 
-Open `build/JimmMac.app` from Finder. UI checks are available through
-`bash scripts/ui-smoke.sh` and use fictional data.
+Open `build/JimmMac.app` from Finder. To build for OS X 10.8, use
+`bash scripts/build.sh legacy` with Xcode 5.1.1 or 6.2.
 
 [Build, packaging and architecture guide](GUIDE.ru.md)
 · [Verification record](../VALIDATION.md)

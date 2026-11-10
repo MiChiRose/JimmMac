@@ -1,9 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build}"
+if [[ "${JIMMMAC_NATIVE_TESTS:-0}" == 1 ]]; then
+    TARGET=(-arch "$(uname -m)" -mmacosx-version-min=11.0)
+    DEFAULT_BUILD_DIR="$PROJECT_ROOT/build/native-tests"
+else
+    TARGET=(-arch x86_64 -mmacosx-version-min=10.8)
+    DEFAULT_BUILD_DIR="$PROJECT_ROOT/build"
+fi
+BUILD_DIR="${BUILD_DIR:-$DEFAULT_BUILD_DIR}"
 mkdir -p "$BUILD_DIR"
-xcrun --sdk macosx clang -arch x86_64 -mmacosx-version-min=10.8 -fobjc-arc -fblocks \
+xcrun --sdk macosx clang "${TARGET[@]}" -fobjc-arc -fblocks \
     -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations -framework Foundation -framework Security -lsqlite3 \
     -I "$PROJECT_ROOT/Sources" "$PROJECT_ROOT/Tests/ProtocolTests.m" \
     "$PROJECT_ROOT/Sources/JMProtocol.m" "$PROJECT_ROOT/Sources/JMHistory.m" "$PROJECT_ROOT/Sources/JMAccountData.m" "$PROJECT_ROOT/Sources/JMLocalization.m" "$PROJECT_ROOT/Sources/JMDraftStore.m" "$PROJECT_ROOT/Sources/JMLoginStore.m" \

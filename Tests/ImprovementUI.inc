@@ -157,7 +157,10 @@ static void ManualUpdateAndAnimationUI(SmokeDelegate *delegate, NSString *output
             sampleWindow.contentView=view;
             [view.textStorage setAttributedString:sample];
             [sampleWindow orderFront:nil];
-            [view display];
+            // Match the transcript's explicit TextKit 1 layout on modern AppKit.
+            [view.layoutManager ensureLayoutForTextContainer:view.textContainer];
+            NSBitmapImageRep *bitmap=[view bitmapImageRepForCachingDisplayInRect:view.bounds];
+            [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
             CheckUI([[cell valueForKey:@"startedAt"] doubleValue]>0 && [view valueForKey:@"smileyTimer"]!=nil,
                 "visible animated attachment schedules its next frame on the Mavericks text view");
             [sampleWindow orderOut:nil];
@@ -276,4 +279,103 @@ static void RetroUpgradeUI(SmokeDelegate *delegate, NSString *output) {
         CheckUI([JMLanguage() isEqual:language] && ![JML(@"Настройки") isEqual:@"Настройки"] && ![JML(@"Непрочитанные") isEqual:@"Непрочитанные"],"Ukrainian and Belarusian provide translated interface strings");
     }
     JMSetLanguage(@"ru");
+}
+
+@interface SmokeDelegate (RetryConfirmation)
+- (void)acceptRetryConfirmation:(NSTimer *)timer;
+@end
+@implementation SmokeDelegate (RetryConfirmation)
+- (void)acceptRetryConfirmation:(NSTimer *)timer {
+    CheckUI(NSApp.modalWindow!=nil,"manual retry asks for confirmation");
+    [NSApp stopModalWithCode:NSAlertFirstButtonReturn];
+}
+@end
+
+static void ConversationNavigationUI(SmokeDelegate *delegate, NSString *output) {
+    UIClient *client=[delegate valueForKey:@"client"];
+    NSWindow *chat=[delegate valueForKey:@"chatWindow"];
+    NSTextView *composer=[delegate valueForKey:@"composer"];
+    NSTextView *transcript=[delegate valueForKey:@"transcript"];
+    NSSegmentedControl *sections=[delegate valueForKey:@"sectionControl"];
+    NSString *account=[delegate valueForKey:@"accountUIN"];
+    delegate.forcedReading=@NO;
+    [delegate selectPeer:@"16001"];
+    Draft(delegate,composer,@"До встречи!");
+    [delegate client:client receivedMessage:@{@"peer":@"16002",@"id":@"navigation-unread",@"text":@"Новое сообщение",
+        @"timestamp":@1793347999,@"outgoing":@NO}];
+    sections.selectedSegment=1;
+    [delegate changeSection:nil];
+    NSMenuItem *pin=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(togglePinConversation:) keyEquivalent:@""];
+    pin.representedObject=@"16001";
+    [delegate togglePinConversation:pin];
+    CheckUI([[[delegate valueForKey:@"visibleContacts"] firstObject][@"aimId"] isEqual:@"16001"] &&
+        [[testAlertDefaults arrayForKey:[@"PinnedPeers." stringByAppendingString:account]] containsObject:@"16001"],
+        "pin moves an older conversation to the top and saves it by account");
+    CheckUI(![[delegate valueForKey:@"favoritePeers"] containsObject:@"16001"],"pin does not change contact favorites");
+
+    KeyInWindow(chat,@"u",NSCommandKeyMask,32);
+    CheckUI([[delegate valueForKey:@"selectedPeer"] isEqual:@"16002"] && [[delegate valueForKey:@"transcriptRanges"] objectForKey:@"navigation-unread"] &&
+        [[delegate draftSnapshot][@"16001"] isEqual:@"До встречи!"],"next unread opens its message and preserves the previous draft");
+
+    [[delegate valueForKey:@"conversationPeers"] removeObject:@"16003"];
+    KeyInWindow(chat,@"k",NSCommandKeyMask,40);
+    NSWindow *picker=[delegate valueForKey:@"quickChatWindow"];
+    NSSearchField *search=[delegate valueForKey:@"quickChatSearch"];
+    NSTableView *results=[delegate valueForKey:@"quickChatTable"];
+    CheckUI(picker.isVisible && results.selectedRow==0 && [[[delegate valueForKey:@"quickChatResults"] firstObject][@"contact"][@"aimId"] isEqual:@"16001"],
+        "conversation picker opens with the pinned conversation at the top");
+    Capture(picker,[output stringByAppendingPathComponent:@"UI-conversation-picker.png"]);
+    KeyInWindow(picker,[NSString stringWithFormat:@"%C",(unichar)NSDownArrowFunctionKey],NSFunctionKeyMask,125);
+    CheckUI(results.selectedRow==1,"down arrow selects the next result without moving focus out of search");
+    search.stringValue=@" iRa ";
+    [delegate controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification object:search]];
+    CheckUI(results.numberOfRows==1 && [[[delegate valueForKey:@"quickChatResults"] firstObject][@"contact"][@"aimId"] isEqual:@"16003"],
+        "name search also finds a contact without a recent chat");
+    search.stringValue=@"16001";
+    [delegate controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification object:search]];
+    KeyInWindow(picker,@"\r",0,36);
+    CheckUI(!picker.isVisible && [[delegate valueForKey:@"selectedPeer"] isEqual:@"16001"] && [composer.string isEqual:@"До встречи!"],
+        "Enter opens the UIN match and restores its draft");
+    [delegate showQuickChat:nil];
+    KeyInWindow(picker,@"\e",0,53);
+    CheckUI(!picker.isVisible && [[delegate valueForKey:@"selectedPeer"] isEqual:@"16001"],"Escape closes the picker without changing conversations");
+    [delegate togglePinConversation:pin];
+    CheckUI(![[testAlertDefaults arrayForKey:[@"PinnedPeers." stringByAppendingString:account]] containsObject:@"16001"],
+        "unpin updates saved account preferences");
+
+    JMHistory *history=[delegate valueForKey:@"history"];
+    [history appendMessage:@{@"peer":@"16001",@"id":@"navigation-unknown",@"text":@"Увидимся?",@"timestamp":@1793348000,@"outgoing":@YES,@"delivery":@"unknown"} error:NULL];
+    [delegate renderTranscript];
+    NSRange retry=[transcript.string rangeOfString:JML(@"Повторить отправку…")];
+    CheckUI(retry.location!=NSNotFound && [transcript.textStorage attribute:NSLinkAttributeName atIndex:retry.location effectiveRange:NULL]!=nil,
+        "unconfirmed message has a visible manual retry link while online");
+    NSUInteger sends=client.sendCount;
+    NSMenuItem *appearance=[[NSMenuItem alloc] init];
+    appearance.representedObject=@"qip";
+    [delegate changeAppearance:appearance];
+    client.fixtureConnected=NO;
+    NSString *status=@"Нет соединения. Повтор через 2 с…";
+    [delegate client:client changedStatus:status connected:NO];
+    CheckUI([[[delegate valueForKey:@"composerHint"] stringValue] isEqual:status] && composer.isEditable &&
+        [transcript.string rangeOfString:JML(@"Повторить отправку…")].location==NSNotFound,
+        "split chat shows reconnection progress while preserving editing and hiding unavailable retry");
+    client.fixtureConnected=YES;
+    [delegate client:client changedStatus:@"Подключено" connected:YES];
+    CheckUI(client.sendCount==sends && [transcript.string rangeOfString:JML(@"Повторить отправку…")].location!=NSNotFound,
+        "reconnection restores manual retry without retransmitting an unconfirmed message");
+    retry=[transcript.string rangeOfString:JML(@"Повторить отправку…")];
+    id retryLink=[transcript.textStorage attribute:NSLinkAttributeName atIndex:retry.location effectiveRange:NULL];
+    NSTimer *confirm=[NSTimer timerWithTimeInterval:0.1 target:delegate selector:@selector(acceptRetryConfirmation:) userInfo:nil repeats:NO];
+    [[NSRunLoop mainRunLoop] addTimer:confirm forMode:NSModalPanelRunLoopMode];
+    [delegate textView:transcript clickedOnLink:retryLink atIndex:retry.location];
+    [confirm invalidate];
+    CheckUI(client.sendCount==sends+1 && [client.sentText isEqual:@"Увидимся?"] && [composer.string isEqual:@"До встречи!"],
+        "confirmed link retries only the chosen message and preserves the separate draft");
+    FinishSend(client,@"navigation-confirmed",nil);
+    appearance.representedObject=@"current";
+    [delegate changeAppearance:appearance];
+    [delegate markAllRead:nil];
+    Draft(delegate,composer,@"");
+    [chat makeKeyAndOrderFront:nil];
+    delegate.forcedReading=@YES;
 }

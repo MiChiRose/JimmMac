@@ -54,6 +54,8 @@
 - (void)setTranscriptAroundID:(NSString *)identifier;
 - (void)renderTranscript;
 - (void)toggleFavorite:(id)sender;
+- (void)togglePinConversation:(id)sender;
+- (void)showQuickChat:(id)sender;
 - (void)toggleOnlineFilter:(id)sender;
 - (void)toggleFavoritesFilter:(id)sender;
 - (void)toggleEmoticons:(id)sender;
@@ -548,7 +550,8 @@ int main(int argc, const char *argv[]) {
         [delegate client:client changedStatus:@"В сети · тестовые данные" connected:YES];
         if (getenv("JIMMMAC_IMPROVEMENTS_ONLY")) {
             [delegate setValue:@"111" forKey:@"accountUIN"]; [delegate setValue:[[FixtureAvatarStore alloc] init] forKey:@"avatars"];
-            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); [[NSFileManager defaultManager] removeItemAtURL:root error:NULL]; printf("PASS: %lu focused improvement UI checks\n",(unsigned long)uiChecks); return 0;
+            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); ConversationNavigationUI(delegate,output);
+            [[NSFileManager defaultManager] removeItemAtURL:root error:NULL]; printf("PASS: %lu focused improvement UI checks\n",(unsigned long)uiChecks); return 0;
         }
         {
             NSTextField *account=[delegate valueForKey:@"accountLabel"], *connection=[delegate valueForKey:@"statusLabel"];
@@ -1499,7 +1502,7 @@ int main(int argc, const char *argv[]) {
             }
             JMSetLanguage(@"ru"); [testAlertDefaults setObject:@"ru" forKey:@"InterfaceLanguage"]; [app setDelegate:delegate];
 
-            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output);
+            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); ConversationNavigationUI(delegate,output);
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
             emptyView=[delegate valueForKey:@"conversationEmptyView"]; emptyFits=YES;
             for (NSView *view in emptyView.subviews) if (!view.hidden && !NSContainsRect(emptyView.bounds,view.frame)) emptyFits=NO;

@@ -55,7 +55,8 @@
     // UIN, token, session ID, messages or NSError's userInfo.
     [self.diagnosticEntries addObject:@{@"endpoint":path, @"http":@(http), @"api":@(api),
         @"errorDomain":error.domain ?: @"", @"errorCode":@(error.code),
-        @"version":@"0.16.0", @"time":@([[NSDate date] timeIntervalSince1970])}];
+        @"version":[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.17.0",
+        @"time":@([[NSDate date] timeIntervalSince1970])}];
     self.diagnosticEntries=[JMSafeDiagnosticEntries(self.diagnosticEntries) mutableCopy];
     NSDictionary *latest=self.diagnosticEntries.lastObject; if (error || http>=400 || api>=400) self.lastDiagnosticFailure=latest;
     if ([self.diagnosticEntries count] > 20) [self.diagnosticEntries removeObjectAtIndex:0];
@@ -137,7 +138,9 @@
     NSUInteger attempt = ++self.sessionSerial;
     [self status:JML(@"Подключаемся к Jimm.online…") connected:NO];
     [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,sessionEnded,rateLimit",
-                                              @"clientName":@"JimmMac Legacy", @"clientVersion":@"0.16.0", @"timeout":@"60"}
+                                              @"clientName":@"JimmMac Legacy",
+                                              @"clientVersion":[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.17.0",
+                                              @"timeout":@"60"}
            timeout:30 completion:^(NSDictionary *data, NSError *error) {
         if (attempt != self.sessionSerial) return;
         if (error) {

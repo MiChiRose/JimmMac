@@ -17,7 +17,12 @@ NSArray *JMSafeDiagnosticEntries(NSArray *entries) {
 }
 NSString *JMDiagnosticReport(NSDictionary *bundle,NSString *system,NSString *connection,BOOL legacy,NSArray *entries) {
     NSString *state=[@[@"connected",@"offline"] containsObject:connection] ? connection : @"disconnected";
-    NSMutableString *report=[NSMutableString stringWithFormat:@"JimmMac %@ (%@)\nOS: %@\nArchitecture: Intel x86_64\nConnection: %@\nTransport: %@\n\n",bundle[@"CFBundleShortVersionString"] ?: @"0.16.0",bundle[@"CFBundleVersion"] ?: @"25",system,state,legacy ? @"NSURLConnection" : @"NSURLSession"];
+#if defined(__arm64__)
+    NSString *architecture=@"Apple Silicon arm64";
+#else
+    NSString *architecture=@"Intel x86_64";
+#endif
+    NSMutableString *report=[NSMutableString stringWithFormat:@"JimmMac %@ (%@)\nOS: %@\nArchitecture: %@\nConnection: %@\nTransport: %@\n\n",bundle[@"CFBundleShortVersionString"] ?: @"0.17.0",bundle[@"CFBundleVersion"] ?: @"30",system,architecture,state,legacy ? @"NSURLConnection" : @"NSURLSession"];
     [report appendFormat:@"%@\n",JML(@"Отчёт не содержит UIN, имён, паролей, токенов и переписки.")];
     NSArray *safe=JMSafeDiagnosticEntries(entries); NSDictionary *lastFailure=nil;
     for (NSDictionary *row in safe) if ([row[@"errorCode"] integerValue] || [row[@"http"] integerValue]>=400 || [row[@"api"] integerValue]>=400) lastFailure=row;

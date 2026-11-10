@@ -3,8 +3,8 @@
   "schema": 1,
   "id": "jimm-mac",
   "name": "JimmMac",
-  "summary": "Нативный ICQ-клиент Jimm.online для Intel Mac с OS X 10.8–macOS 10.13",
-  "description": "JimmMac возвращает переписку по UIN на старые Intel Mac. Есть контакты и группы, аватары, уведомления, поиск по истории, закладки и офлайн-доступ к переписке. Локальную историю можно экспортировать и переносить в резервной копии.\n\nКонтакты можно блокировать, а переписки фильтровать по непрочитанным. Интерфейс доступен на русском, английском, украинском и белорусском. Пять оформлений: JimmMac, ICQ для Mac 2011, ICQ Pro 2003b, QIP и Jimm. В темах QIP и Jimm воспроизводится анимация классических смайликов. Сборка проверена на OS X 10.9.5 Mavericks. Остальные версии в целевом диапазоне ждут проверки на реальных системах.",
+  "summary": "ICQ-клиент Jimm.online для Intel и Apple Silicon Mac. Доступна сборка для старых Intel Mac.",
+  "description": "JimmMac возвращает переписку по UIN на Intel и Apple Silicon Mac. Универсальный выпуск 0.17.0 рассчитан на Intel с macOS 10.13 и новее и на Apple Silicon с macOS 11 и новее. Для OS X 10.8–macOS 10.12 выпуск 0.16.0 доступен на GitHub.\n\nЕсть контакты и группы, уведомления, аватары, поиск, закреплённые переписки и офлайн-история. Интерфейс доступен на русском, английском, украинском и белорусском. Пять оформлений включают классические темы QIP и Jimm с анимированными смайликами.",
   "icon": "https://raw.githubusercontent.com/MiChiRose/JimmMac/main/Resources/JimmStoreIcon.png",
   "screenshots": [
     "https://raw.githubusercontent.com/MiChiRose/JimmMac/v0.15.0/screenshots/UI-chat-polished.png",
@@ -20,7 +20,7 @@
   "platforms": [
     {
       "os": "macos",
-      "min_version": "10.8",
+      "min_version": "10.13",
       "source": {
         "type": "github",
         "repo": "MiChiRose/JimmMac"

@@ -135,6 +135,8 @@ static NSString *JMState(NSDictionary *contact) {
 @property(nonatomic,strong) NSMutableSet *mutedPeers;
 @property(nonatomic,strong) NSButton *offlineHistoryButton;
 @property(nonatomic, strong) NSMutableSet *favoritePeers;
+@property(nonatomic, strong) NSMutableSet *pinnedPeers;
+@property(nonatomic, copy) NSString *connectionStatus;
 @property(nonatomic, strong) NSButton *onlineOnlyCheckbox;
 @property(nonatomic, strong) NSButton *favoritesOnlyCheckbox;
 @property(nonatomic, strong) NSButton *emoticonsCheckbox;
@@ -243,6 +245,12 @@ static NSString *JMState(NSDictionary *contact) {
 @property(nonatomic, strong) NSTableView *historyTable;
 @property(nonatomic, strong) NSTextField *historySearchStatus;
 @property(nonatomic, strong) NSButton *historyOpenButton;
+@property(nonatomic, strong) JMPanel *quickChatWindow;
+@property(nonatomic, strong) NSSearchField *quickChatSearch;
+@property(nonatomic, strong) JMContactTable *quickChatTable;
+@property(nonatomic, strong) NSTextField *quickChatEmpty;
+@property(nonatomic, strong) NSButton *quickChatOpen;
+@property(nonatomic, strong) NSArray *quickChatResults;
 @property(nonatomic, strong) NSArray *historyResults;
 @property(nonatomic, copy) NSString *historyResultsQuery;
 @property(nonatomic, strong) dispatch_queue_t historySearchQueue;
@@ -643,6 +651,8 @@ static NSString *JMState(NSDictionary *contact) {
             [self.conversationPeers addObjectsFromArray:history.peers]; self.unread=[history.unreadCounts mutableCopy];
             NSDictionary *preferences=[JMAccountData preferencesForUIN:self.accountUIN defaults:self.loginDefaults];
             self.favoritePeers=[NSMutableSet setWithArray:JMArray(preferences[@"FavoritePeers"])]; self.mutedPeers=[NSMutableSet setWithArray:JMArray(preferences[@"MutedPeers"])];
+            self.pinnedPeers=[NSMutableSet setWithArray:JMArray(preferences[@"PinnedPeers"])];
+            [self.conversationPeers unionSet:self.pinnedPeers];
             [self.conversationPeers addObjectsFromArray:JMArray(preferences[@"ConversationPeers"])]; [self persistConversationPeers];
             self.favoritesOnlyCheckbox.state=[preferences[@"FavoritesOnly"] boolValue] ? NSOnState : NSOffState;
             self.chatPreferences=[[JMChatPreferences alloc] initWithDefaults:self.loginDefaults]; [self applyChatFont];
@@ -674,6 +684,15 @@ static NSString *JMState(NSDictionary *contact) {
     NSString *peer=[self contactForAction:sender]; if (!self.history || !JMValidUIN(peer)) return;
     if ([self.favoritePeers containsObject:peer]) [self.favoritePeers removeObject:peer]; else [self.favoritePeers addObject:peer];
     if (self.accountUIN.length) { [self.loginDefaults setObject:[self.favoritePeers allObjects] forKey:[@"FavoritePeers." stringByAppendingString:self.accountUIN]]; [self.loginDefaults synchronize]; }
+    [self reloadContacts];
+}
+- (void)togglePinConversation:(id)sender {
+    NSString *peer=[self contactForAction:sender];
+    if (!self.history || !self.accountUIN.length || self.dataOperationInProgress || ![self.conversationPeers containsObject:peer]) return;
+    if ([self.pinnedPeers containsObject:peer]) [self.pinnedPeers removeObject:peer];
+    else [self.pinnedPeers addObject:peer];
+    [self.loginDefaults setObject:self.pinnedPeers.allObjects forKey:[@"PinnedPeers." stringByAppendingString:self.accountUIN]];
+    [self.loginDefaults synchronize];
     [self reloadContacts];
 }
 - (void)toggleOnlineFilter:(id)sender {
@@ -876,7 +895,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.draftSaveQueue=dispatch_queue_create("online.jimm.drafts",DISPATCH_QUEUE_SERIAL);
     self.contacts = [NSMutableDictionary dictionary]; self.drafts = [NSMutableDictionary dictionary]; self.unread = [NSMutableDictionary dictionary];
     self.serverContactIDs = [NSMutableSet set]; self.conversationPeers = [NSMutableSet set];
-    self.serverGroups=[NSMutableArray array]; self.favoritePeers=[NSMutableSet set]; self.mutedPeers=[NSMutableSet set]; self.transcriptTail=YES;
+    self.serverGroups=[NSMutableArray array]; self.favoritePeers=[NSMutableSet set]; self.pinnedPeers=[NSMutableSet set]; self.mutedPeers=[NSMutableSet set]; self.transcriptTail=YES;
     self.ownInfo=[NSMutableDictionary dictionary]; self.profileDates=[NSMutableDictionary dictionary]; self.profileTexts=[NSMutableDictionary dictionary]; self.incomingTyping=[NSMutableDictionary dictionary];
     if (JMFlowerImage()) [NSApp setApplicationIconImage:JMFlowerImage()];
     [self createMenu]; [self createLoginWindow]; [self createChatWindow];
@@ -952,8 +971,12 @@ static NSString *JMState(NSDictionary *contact) {
     for (NSDictionary *entry in @[@{@"title":JML(@"Только в сети"),@"action":@"toggleOnlineFilter:"},@{@"title":JML(@"Только избранные"),@"action":@"toggleFavoritesFilter:"},@{@"title":JML(@"Классические смайлики"),@"action":@"toggleEmoticons:"}]) {
         NSMenuItem *item=[viewMenu addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self;
     }
-    NSMenuItem *unreadFilter=[viewMenu addItemWithTitle:JML(@"Только непрочитанные") action:@selector(toggleUnreadFilter:) keyEquivalent:@"u"]; unreadFilter.target=self;
+    NSMenuItem *unreadFilter=[viewMenu addItemWithTitle:JML(@"Только непрочитанные") action:@selector(toggleUnreadFilter:) keyEquivalent:@"U"]; unreadFilter.target=self;
     unreadFilter.keyEquivalentModifierMask=NSCommandKeyMask|NSShiftKeyMask;
+    NSMenuItem *quickChat=[viewMenu addItemWithTitle:JML(@"Перейти к переписке…") action:@selector(showQuickChat:) keyEquivalent:@"k"];
+    quickChat.target=self;
+    NSMenuItem *nextUnread=[viewMenu addItemWithTitle:JML(@"Следующая непрочитанная переписка") action:@selector(openNextUnread:) keyEquivalent:@"u"];
+    nextUnread.target=self;
     NSMenuItem *collapse=[viewMenu addItemWithTitle:JML(@"Свернуть или развернуть группу") action:@selector(toggleSelectedGroup:) keyEquivalent:@""]; collapse.target=self;
     NSMenuItem *appearanceItem=[[NSMenuItem alloc] initWithTitle:JML(@"Оформление") action:NULL keyEquivalent:@""]; NSMenu *appearance=[[NSMenu alloc] initWithTitle:JML(@"Оформление")];
     NSArray *themeNames=@[JML(@"Текущий"),JML(@"Ностальгия · ICQ для Mac 2011"),JML(@"Ностальгия · ICQ Pro 2003b"),@"QIP",@"Jimm"], *themeIDs=JMThemeIdentifiers();
@@ -969,6 +992,8 @@ static NSString *JMState(NSDictionary *contact) {
     for (NSDictionary *entry in @[@{@"title":JML(@"Добавить по UIN…"),@"action":@"addContact:"},@{@"title":JML(@"Переименовать контакт…"),@"action":@"renameContact:"},@{@"title":JML(@"Переместить в группу…"),@"action":@"moveContact:"},@{@"title":JML(@"Удалить из контактов…"),@"action":@"removeContact:"}]) {
         NSMenuItem *item=[contactsMenu addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self;
     }
+    NSMenuItem *pin=[contactsMenu addItemWithTitle:JML(@"Закрепить переписку") action:@selector(togglePinConversation:) keyEquivalent:@""];
+    pin.target=self;
     NSMenuItem *favorite=[contactsMenu addItemWithTitle:JML(@"Добавить в избранное") action:@selector(toggleFavorite:) keyEquivalent:@""]; favorite.target=self;
     NSMenuItem *mute=[contactsMenu addItemWithTitle:JML(@"Отключить уведомления") action:@selector(toggleMuteConversation:) keyEquivalent:@""]; mute.target=self;
     [contactsMenu addItem:[NSMenuItem separatorItem]];
@@ -1211,6 +1236,7 @@ static NSString *JMState(NSDictionary *contact) {
     else [self selectPeer:contact[@"aimId"]];
 }
 - (void)handleEscapeInWindow:(NSWindow *)window {
+    if (window==self.quickChatWindow) { [self closeQuickChat:nil]; return; }
     if (window==self.rosterWindow) {
         if (self.searchField.stringValue.length) { self.searchField.stringValue=@""; [self reloadContacts]; }
         else [self.rosterWindow makeFirstResponder:self.contactTable]; return;
@@ -1337,6 +1363,8 @@ static NSString *JMState(NSDictionary *contact) {
     for (NSDictionary *entry in @[@{@"title":JML(@"Открыть переписку"),@"action":@"writeContact:"},@{@"title":JML(@"Профиль"),@"action":@"profileContact:"},@{@"title":JML(@"Переименовать…"),@"action":@"renameContact:"},@{@"title":JML(@"Переместить в группу…"),@"action":@"moveContact:"},@{@"title":JML(@"Удалить из контактов…"),@"action":@"removeContact:"}]) {
         NSMenuItem *item=[self.contactMenu addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self;
     }
+    NSMenuItem *pinContext=[self.contactMenu addItemWithTitle:JML(@"Закрепить переписку") action:@selector(togglePinConversation:) keyEquivalent:@""];
+    pinContext.target=self;
     NSMenuItem *favoriteContext=[self.contactMenu addItemWithTitle:JML(@"Добавить в избранное") action:@selector(toggleFavorite:) keyEquivalent:@""]; favoriteContext.target=self;
     NSMenuItem *muteContext=[self.contactMenu addItemWithTitle:JML(@"Отключить уведомления") action:@selector(toggleMuteConversation:) keyEquivalent:@""]; muteContext.target=self;
     [self.contactTable setMenu:self.contactMenu];
@@ -1611,7 +1639,10 @@ static NSString *JMState(NSDictionary *contact) {
     // space must not silently reuse the previously selected conversation.
     if ([[NSApp currentEvent] type]==NSKeyDown) row=self.contactTable.selectedRow;
     NSString *peer=row>=0 && row<(NSInteger)self.visibleContacts.count ? self.visibleContacts[(NSUInteger)row][@"aimId"] : nil;
-    for (NSMenuItem *item in menu.itemArray) item.representedObject=peer ?: (id)[NSNull null];
+    for (NSMenuItem *item in menu.itemArray) {
+        item.representedObject=peer ?: (id)[NSNull null];
+        if (item.action==@selector(togglePinConversation:)) item.hidden=self.sectionControl.selectedSegment!=1;
+    }
 }
 - (void)writeContact:(id)sender {
     NSString *peer=[self contactForAction:sender]; if (!JMValidUIN(peer)) return;
@@ -2075,6 +2106,13 @@ static NSString *JMState(NSDictionary *contact) {
 - (BOOL)openExternalURL:(NSURL *)url { return [[NSWorkspace sharedWorkspace] openURL:url]; }
 - (BOOL)textView:(NSTextView *)textView clickedOnLink:(id)link atIndex:(NSUInteger)charIndex {
     if (textView!=self.transcript) return NO;
+    if ([link isEqual:[NSURL URLWithString:@"jimmmac-action:retry"]] && charIndex<textView.textStorage.length &&
+        [[textView.textStorage attribute:NSLinkAttributeName atIndex:charIndex effectiveRange:NULL] isEqual:link]) {
+        NSString *identifier=[textView.textStorage attribute:@"JMMessageID" atIndex:charIndex effectiveRange:NULL];
+        NSDictionary *message=[self.history messageWithID:identifier peer:self.selectedPeer];
+        [self confirmRetryMessage:message];
+        return YES;
+    }
     NSURL *url=JMExternalURL(link); if (url) [self openExternalURL:url];
     return YES;
 }
@@ -2209,6 +2247,13 @@ static NSString *JMState(NSDictionary *contact) {
     if (item.action==@selector(renameContact:) || item.action==@selector(removeContact:) || item.action==@selector(moveContact:)) return [self canChangeRoster] && [self.serverContactIDs containsObject:[self contactForAction:item]];
     if (item.action==@selector(writeContact:) || item.action==@selector(profileContact:)) return JMValidUIN([self contactForAction:item]);
     if (item.action==@selector(addContact:)) return [self canChangeRoster];
+    if (item.action==@selector(openNextUnread:)) return [self canNavigateConversations] && self.unread.count>0;
+    if (item.action==@selector(showQuickChat:)) return [self canNavigateConversations];
+    if (item.action==@selector(togglePinConversation:)) {
+        NSString *peer=[self contactForAction:item];
+        item.title=[self.pinnedPeers containsObject:peer] ? JML(@"Открепить переписку") : JML(@"Закрепить переписку");
+        return self.history && self.accountUIN.length && !self.dataOperationInProgress && [self.conversationPeers containsObject:peer];
+    }
     if (item.action==@selector(toggleUnreadFilter:)) { item.state=(self.unreadOnly && self.sectionControl.selectedSegment==1) ? NSOnState : NSOffState; return self.history!=nil; }
     if (item.action==@selector(toggleSelectedGroup:)) return self.sectionControl.selectedSegment==0 && self.contactTable.selectedRow>=0 && !self.searchField.stringValue.length;
     if (item.action==@selector(toggleContactBlock:)) {
@@ -2233,7 +2278,7 @@ static NSString *JMState(NSDictionary *contact) {
     if (item.action==@selector(toggleAutomaticUpdates:)) { item.state=[self automaticUpdatesEnabled] ? NSOnState : NSOffState; return YES; }
     if (item.action==@selector(checkForUpdates:)) return !self.terminating;
     if (item.action==@selector(exportConversation:)) return !self.exportingHistory && self.selectedPeer.length && [self.history countForPeer:self.selectedPeer]>0;
-    if (item.action==@selector(retryMessage:)) { NSDictionary *message=[self messageForAction:item]; return self.client.connected && !self.sending && self.sendNotBefore.timeIntervalSinceNow<=0 && [@[@"failed",@"unknown"] containsObject:JMString(message[@"delivery"])]; }
+    if (item.action==@selector(retryMessage:)) return [self canRetryMessage:[self messageForAction:item]];
     if (item.action==@selector(toggleFavorite:)) { NSString *peer=[self contactForAction:item]; BOOL favorite=[self.favoritePeers containsObject:peer]; item.title=favorite ? JML(@"Убрать из избранного") : JML(@"Добавить в избранное"); item.state=favorite ? NSOnState : NSOffState; return self.history && JMValidUIN(peer); }
     if (item.action==@selector(toggleOnlineFilter:)) { item.state=self.onlineOnlyCheckbox.state; return self.history!=nil; }
     if (item.action==@selector(toggleFavoritesFilter:)) { item.state=self.favoritesOnlyCheckbox.state; return self.history!=nil; }
@@ -2252,7 +2297,8 @@ static NSString *JMState(NSDictionary *contact) {
     self.rememberLoginCheckbox.enabled=NO; self.cancelLoginButton.hidden=NO; self.cancelLoginButton.enabled=YES;
 }
 - (BOOL)prepareLoginUIForUIN:(NSString *)uin {
-    self.loginAttemptSerial++; self.unreadOnly=NO; self.changingPrivacy=NO; self.restoringMessages=NO; self.restoreAfterReconnect=NO;
+    [self closeQuickChat:nil];
+    self.loginAttemptSerial++; self.connectionStatus=nil; self.unreadOnly=NO; self.changingPrivacy=NO; self.restoringMessages=NO; self.restoreAfterReconnect=NO;
     [self.historyWindow orderOut:nil]; self.historySearchGeneration++; self.historyResults=@[]; [self.historyTable reloadData]; [self.historySearchField setStringValue:@""];
     self.offlineMode=NO; self.onlineOnlyCheckbox.enabled=YES;
     if ([self.presencePopup.lastItem.representedObject isEqual:@"offline-local"]) [self.presencePopup removeItemAtIndex:self.presencePopup.numberOfItems-1];
@@ -2274,6 +2320,9 @@ static NSString *JMState(NSDictionary *contact) {
     JMSetLabel(self.presenceFeedback,@""); self.connectedSince=nil; self.wasConnected=NO;
     for (id peer in JMArray([self.loginDefaults objectForKey:[@"ConversationPeers." stringByAppendingString:uin]]))
         if (JMValidUIN(JMString(peer))) [self.conversationPeers addObject:JMString(peer)];
+    NSArray *pins=JMArray([JMAccountData preferencesForUIN:uin defaults:self.loginDefaults][@"PinnedPeers"]);
+    [self.pinnedPeers setSet:[NSSet setWithArray:pins]];
+    [self.conversationPeers unionSet:self.pinnedPeers];
     [self.conversationPeers addObjectsFromArray:[self.history peers]];
     [self.contactNotice setStringValue:@""];
     [self.composer setString:@""]; [self.composer.undoManager removeAllActions]; [self.transcript setString:@""];
@@ -2370,7 +2419,8 @@ static NSString *JMState(NSDictionary *contact) {
     [self.avatars invalidate]; self.avatars=nil; [self.profileWindow orderOut:nil]; self.profilePeer=nil; [self.ownInfo removeAllObjects];
     [self.client disconnect]; self.sending = NO; self.sendNotBefore = nil;
     self.accountUIN = nil; self.addingContact = NO; [self.serverContactIDs removeAllObjects]; [self.conversationPeers removeAllObjects];
-    self.history = nil; self.offlineMode=NO; self.selectedPeer = nil; [self.mutedPeers removeAllObjects]; [self.favoritePeers removeAllObjects]; self.onlineOnlyCheckbox.state=NSOffState; self.favoritesOnlyCheckbox.state=NSOffState; self.sendingLocalID=nil;
+    [self closeQuickChat:nil];
+    self.history = nil; self.offlineMode=NO; self.selectedPeer = nil; [self.mutedPeers removeAllObjects]; [self.favoritePeers removeAllObjects]; [self.pinnedPeers removeAllObjects]; self.onlineOnlyCheckbox.state=NSOffState; self.favoritesOnlyCheckbox.state=NSOffState; self.sendingLocalID=nil;
     [self.contacts removeAllObjects]; [self.drafts removeAllObjects]; [self.unread removeAllObjects];
     [self.composer setString:@""]; [self.composer.undoManager removeAllActions]; [self.transcript setString:@""]; [self reloadContacts];
     [self updateDockBadge]; [self.audioAlerts stop];
@@ -2389,11 +2439,14 @@ static NSString *JMState(NSDictionary *contact) {
     if (!connected) { self.connectedSince=nil; JMSetLabel(self.presenceFeedback,@""); }
     if (!connected && self.wasConnected) self.restoreAfterReconnect=YES;
     BOOL restore=connected && self.restoreAfterReconnect;
+    BOOL connectionChanged=connected!=self.wasConnected;
     self.wasConnected=connected;
+    self.connectionStatus=status;
     JMSetLabel(self.statusLabel,status); JMSetLabel(self.loginStatus,status); if (self.diagnosticsWindow.isVisible) [self refreshDiagnostics:nil];
     [self updateAccountLabel];
     if (connected && [self.loginWindow isVisible]) { [self.loginWindow orderOut:nil]; [self showSessionWindows]; }
     [self updateSendButton]; [self updateTypingIndicator];
+    if (connectionChanged && self.selectedPeer.length) [self renderTranscript];
     if (restore) { self.restoreAfterReconnect=NO; [self restoreRecentMessages:nil]; }
     if (connected) { [self openPendingNotification]; [self presentPendingUpdateIfPossible]; }
 }
@@ -2410,6 +2463,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.ownProfileController invalidate]; self.ownProfileController=nil;
     self.notificationAlerts.accountUIN=nil;
     [self stopOutgoingTyping]; [self.profileWindow orderOut:nil];
+    [self closeQuickChat:nil];
     [self.chatWindow orderOut:nil]; [self.rosterWindow orderOut:nil]; [self resetLogin:[error localizedDescription]];
 }
 - (void)client:(JMAPIClient *)client receivedBuddyList:(NSDictionary *)buddyList {
@@ -2530,6 +2584,147 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)conversationDidScroll:(NSNotification *)notification { [self markSelectedRead]; }
 - (void)windowDidBecomeKey:(NSNotification *)notification { if (notification.object==self.chatWindow || notification.object==self.rosterWindow) { [self markSelectedRead]; [self presentPendingUpdateIfPossible]; } }
 - (void)applicationDidBecomeActive:(NSNotification *)notification { [self markSelectedRead]; [self presentPendingUpdateIfPossible]; }
+- (void)createQuickChatWindow {
+    NSRect frame=NSMakeRect(0,0,440,335);
+    self.quickChatWindow=[[JMPanel alloc] initWithContentRect:frame styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
+    self.quickChatWindow.title=JML(@"Перейти к переписке…");
+    self.quickChatWindow.releasedWhenClosed=NO;
+    self.quickChatWindow.delegate=self;
+    self.quickChatWindow.contentView=[[JMWindowView alloc] initWithFrame:frame];
+    NSView *root=self.quickChatWindow.contentView;
+    self.quickChatSearch=[[JMThemedSearchField alloc] initWithFrame:NSMakeRect(16,289,408,30)];
+    [[self.quickChatSearch cell] setPlaceholderString:JML(@"Имя или UIN")];
+    self.quickChatSearch.delegate=(id)self;
+    self.quickChatSearch.target=self;
+    self.quickChatSearch.action=@selector(filterQuickChats:);
+    [root addSubview:self.quickChatSearch];
+
+    NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(16,48,408,232)];
+    scroll.hasVerticalScroller=YES;
+    scroll.borderType=NSBezelBorder;
+    self.quickChatTable=[[JMContactTable alloc] initWithFrame:scroll.contentView.bounds];
+    self.quickChatTable.headerView=nil;
+    self.quickChatTable.rowHeight=42;
+    self.quickChatTable.columnAutoresizingStyle=NSTableViewFirstColumnOnlyAutoresizingStyle;
+    NSTableColumn *column=[[NSTableColumn alloc] initWithIdentifier:@"quickChat"];
+    column.width=NSWidth(scroll.contentView.bounds);
+    [self.quickChatTable addTableColumn:column];
+    self.quickChatTable.delegate=self;
+    self.quickChatTable.dataSource=self;
+    self.quickChatTable.target=self;
+    self.quickChatTable.doubleAction=@selector(openClickedQuickChatResult:);
+    self.quickChatTable.activateAction=@selector(openQuickChatResult:);
+    scroll.documentView=self.quickChatTable;
+    [root addSubview:scroll];
+
+    self.quickChatEmpty=JMLabel(JML(@"Переписки не найдены."),NSMakeRect(25,149,390,22),13,NO);
+    self.quickChatEmpty.alignment=NSCenterTextAlignment;
+    self.quickChatEmpty.textColor=JMSecondaryTextColor();
+    [root addSubview:self.quickChatEmpty];
+    NSTextField *hint=JMLabel(JML(@"↑ ↓ — выбрать · Enter — открыть"),NSMakeRect(16,12,295,24),12,NO);
+    hint.textColor=JMSecondaryTextColor();
+    [root addSubview:hint];
+    self.quickChatOpen=JMButton(JML(@"Открыть"),NSMakeRect(321,12,103,28),self,@selector(openQuickChatResult:));
+    [root addSubview:self.quickChatOpen];
+    [self.quickChatWindow center];
+}
+- (BOOL)canNavigateConversations {
+    return self.history && self.accountUIN.length && !self.dataOperationInProgress && !self.loginPending && !self.loginWindow.isVisible;
+}
+- (void)showQuickChat:(id)sender {
+    if (![self canNavigateConversations]) return;
+    if (!self.quickChatWindow) [self createQuickChatWindow];
+    if (!self.quickChatWindow.isVisible) self.quickChatSearch.stringValue=@"";
+    [self filterQuickChats:nil];
+    [self.quickChatWindow makeKeyAndOrderFront:nil];
+    [self.quickChatWindow makeFirstResponder:self.quickChatSearch];
+}
+- (void)filterQuickChats:(id)sender {
+    NSString *query=[self.quickChatSearch.stringValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSMutableSet *peers=[self.conversationPeers mutableCopy];
+    if (query.length) [peers unionSet:self.serverContactIDs];
+    NSMutableArray *matches=[NSMutableArray array];
+    for (NSString *peer in peers) {
+        NSDictionary *contact=self.contacts[peer] ?: @{@"aimId":peer,@"friendly":peer};
+        if (query.length && [JMName(contact) rangeOfString:query options:NSCaseInsensitiveSearch|NSDiacriticInsensitiveSearch].location==NSNotFound &&
+            [peer rangeOfString:query].location==NSNotFound) continue;
+        BOOL recent=[self.conversationPeers containsObject:peer];
+        NSTimeInterval time=recent ? [[self.history lastMessageForPeer:peer][@"timestamp"] doubleValue] : 0;
+        [matches addObject:@{@"contact":contact,@"exact":@([peer isEqual:query]),@"pinned":@([self.pinnedPeers containsObject:peer]),
+            @"recent":@(recent),@"time":@(time)}];
+    }
+    [matches sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        for (NSString *key in @[@"exact",@"pinned",@"recent",@"time"]) {
+            NSComparisonResult order=[b[key] compare:a[key]];
+            if (order!=NSOrderedSame) return order;
+        }
+        NSComparisonResult order=[JMName(a[@"contact"]) localizedCaseInsensitiveCompare:JMName(b[@"contact"])];
+        return order==NSOrderedSame ? [a[@"contact"][@"aimId"] compare:b[@"contact"][@"aimId"]] : order;
+    }];
+    self.quickChatResults=matches;
+    [self.quickChatTable reloadData];
+    self.quickChatEmpty.hidden=matches.count>0;
+    self.quickChatOpen.enabled=matches.count>0;
+    if (matches.count) {
+        [self.quickChatTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+        [self.quickChatTable scrollRowToVisible:0];
+    }
+}
+- (void)closeQuickChat:(id)sender {
+    [self.quickChatWindow orderOut:nil];
+    self.quickChatSearch.stringValue=@"";
+    self.quickChatResults=nil;
+    [self.quickChatTable reloadData];
+}
+- (void)openQuickChatResult:(id)sender {
+    NSInteger row=self.quickChatTable.selectedRow;
+    if (!self.quickChatWindow.isVisible || ![self canNavigateConversations] || row<0 || (NSUInteger)row>=self.quickChatResults.count) return;
+    NSString *peer=self.quickChatResults[(NSUInteger)row][@"contact"][@"aimId"];
+    [self closeQuickChat:nil];
+    [self openConversationPeer:peer];
+}
+- (void)openClickedQuickChatResult:(id)sender {
+    if (self.quickChatTable.clickedRow>=0) [self openQuickChatResult:sender];
+}
+- (void)openConversationPeer:(NSString *)peer {
+    if (!self.history || self.dataOperationInProgress || !JMValidUIN(peer)) return;
+    if (!self.contacts[peer]) self.contacts[peer]=[@{@"aimId":peer,@"friendly":peer,@"state":@"offline"} mutableCopy];
+    if (self.sectionControl.selectedSegment!=1) { self.sectionControl.selectedSegment=1; [self changeSection:nil]; }
+    if (self.chatWindow.isMiniaturized) [self.chatWindow deminiaturize:nil];
+    [self selectPeer:peer];
+    [self.chatWindow makeKeyAndOrderFront:nil];
+}
+- (void)openNextUnread:(id)sender {
+    if (![self canNavigateConversations] || !self.unread.count) return;
+    NSMutableArray *peers=[NSMutableArray array];
+    NSMutableDictionary *activity=[NSMutableDictionary dictionary];
+    for (NSString *peer in self.unread) {
+        if ([self.unread[peer] integerValue]<=0) continue;
+        [peers addObject:peer];
+        activity[peer]=@([[self.history lastMessageForPeer:peer][@"timestamp"] doubleValue]);
+    }
+    [peers sortUsingComparator:^NSComparisonResult(NSString *a,NSString *b) {
+        NSComparisonResult order=[activity[b] compare:activity[a]];
+        return order==NSOrderedSame ? [a compare:b] : order;
+    }];
+    NSUInteger current=self.selectedPeer ? [peers indexOfObject:self.selectedPeer] : NSNotFound;
+    if (!peers.count) return;
+    NSString *peer=peers[current==NSNotFound ? 0 : (current+1)%peers.count];
+    if ([peer isEqual:self.selectedPeer]) {
+        NSString *first=[self.history firstUnreadIDForPeer:peer];
+        if (first) {
+            [self setTranscriptAroundID:first]; [self renderTranscript];
+            NSValue *range=self.transcriptRanges[first];
+            if (range) {
+                self.renderingTranscript=YES;
+                [self.transcript scrollRangeToVisible:range.rangeValue];
+                self.renderingTranscript=NO;
+            }
+        }
+        if (self.chatWindow.isMiniaturized) [self.chatWindow deminiaturize:nil];
+        [self.chatWindow makeKeyAndOrderFront:nil];
+    } else [self openConversationPeer:peer];
+}
 - (void)reloadContacts {
     NSString *query = [self.searchField stringValue] ?: @"";
     NSString *selectionPeer=self.selectedPeer;
@@ -2546,6 +2741,10 @@ static NSString *JMState(NSDictionary *contact) {
         if (![query length] || [JMName(contact) rangeOfString:query options:NSCaseInsensitiveSearch].location != NSNotFound || [JMString(contact[@"aimId"]) rangeOfString:query].location != NSNotFound) [contacts addObject:contact];
     }
     [contacts sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        if (conversations) {
+            BOOL pinnedA=[self.pinnedPeers containsObject:a[@"aimId"]], pinnedB=[self.pinnedPeers containsObject:b[@"aimId"]];
+            if (pinnedA!=pinnedB) return pinnedA ? NSOrderedAscending : NSOrderedDescending;
+        }
         BOOL favoriteA=[self.favoritePeers containsObject:a[@"aimId"]],favoriteB=[self.favoritePeers containsObject:b[@"aimId"]];
         if (favoriteA!=favoriteB) return favoriteA ? NSOrderedAscending : NSOrderedDescending;
         if (!conversations) {
@@ -2606,9 +2805,13 @@ static NSString *JMState(NSDictionary *contact) {
     [[self.searchField cell] setPlaceholderString:[self.sectionControl selectedSegment] == 1 ? JML(@"Поиск переписок") : JML(@"Поиск контактов")];
     [self layoutChatWindow]; [self reloadContacts];
 }
-- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView { return tableView==self.historyTable ? self.historyResults.count : self.visibleContacts.count; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
+    if (tableView==self.quickChatTable) return self.quickChatResults.count;
+    return tableView==self.historyTable ? self.historyResults.count : self.visibleContacts.count;
+}
 - (NSTableRowView *)tableView:(NSTableView *)tableView rowViewForRow:(NSInteger)row { return [[JMContactRowView alloc] initWithFrame:NSZeroRect]; }
 - (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
+    if (tableView==self.quickChatTable) return JMName(self.quickChatResults[(NSUInteger)row][@"contact"]);
     if (tableView==self.historyTable) return JMString(self.historyResults[(NSUInteger)row][@"text"]);
     NSDictionary *contact = self.visibleContacts[(NSUInteger)row]; NSString *peer = contact[@"aimId"];
     if (contact[@"_collapsedGroup"]) return [self historicalHeaderForRow:row];
@@ -2621,6 +2824,20 @@ static NSString *JMState(NSDictionary *contact) {
     return text;
 }
 - (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
+    if (tableView==self.quickChatTable) {
+        JMListCell *cell=[tableView makeViewWithIdentifier:@"quickChatResult" owner:self];
+        if (!cell) {
+            cell=[[JMListCell alloc] initWithFrame:NSMakeRect(0,0,NSWidth(tableView.bounds),tableView.rowHeight)];
+            cell.identifier=@"quickChatResult";
+        }
+        NSDictionary *contact=self.quickChatResults[(NSUInteger)row][@"contact"];
+        NSString *peer=contact[@"aimId"];
+        NSString *name=JMName(contact);
+        if ([self.pinnedPeers containsObject:peer]) name=[@"📌 " stringByAppendingString:name];
+        [cell configureName:name detail:[@"UIN " stringByAppendingString:peer] state:JMString(contact[@"state"]) unread:[self.unread[peer] integerValue]];
+        [cell setAvatar:[self.avatars imageForUIN:peer]];
+        return cell;
+    }
     if (tableView==self.historyTable) {
         JMListCell *cell=[tableView makeViewWithIdentifier:@"historyResult" owner:self];
         if (!cell) { cell=[[JMListCell alloc] initWithFrame:NSMakeRect(0,0,NSWidth(tableView.bounds),54)]; cell.identifier=@"historyResult"; }
@@ -2649,7 +2866,9 @@ static NSString *JMState(NSDictionary *contact) {
         detail = [detail stringByReplacingOccurrencesOfString:@"\n" withString:@" "];
     }
     if (JMTheme()==JMThemeMac2011 && self.sectionControl.selectedSegment==0) detail=JMString(contact[@"statusMsg"]);
-    [cell configureName:[self.favoritePeers containsObject:peer] ? [@"★ " stringByAppendingString:JMName(contact)] : JMName(contact) detail:detail state:JMString(contact[@"state"]) unread:[self.unread[peer] integerValue]];
+    BOOL pinned=self.sectionControl.selectedSegment==1 && [self.pinnedPeers containsObject:peer];
+    NSString *marker=pinned ? @"📌 " : ([self.favoritePeers containsObject:peer] ? @"★ " : @"");
+    [cell configureName:[marker stringByAppendingString:JMName(contact)] detail:detail state:JMString(contact[@"state"]) unread:[self.unread[peer] integerValue]];
     if (self.sectionControl.selectedSegment==1) {
         NSDictionary *last=[self.history lastMessageForPeer:peer];
         [cell setTimestamp:last ? [self listTimestamp:[NSDate dateWithTimeIntervalSince1970:[last[@"timestamp"] doubleValue]]] : nil draft:JMString(self.drafts[peer]).length>0];
@@ -2672,6 +2891,7 @@ static NSString *JMState(NSDictionary *contact) {
     return [format stringFromDate:date];
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
+    if (notification.object==self.quickChatTable) { self.quickChatOpen.enabled=self.quickChatTable.selectedRow>=0; return; }
     if (notification.object==self.historyTable) { [self.historyOpenButton setEnabled:self.historyTable.selectedRow>=0]; return; }
     if (self.reloadingContacts || JMTheme()!=JMThemeCurrent) return;
     NSInteger row = [self.contactTable selectedRow]; if (row < 0 || row >= (NSInteger)[self.visibleContacts count]) return;
@@ -2752,12 +2972,18 @@ static NSString *JMState(NSDictionary *contact) {
         BOOL outgoing=[message[@"outgoing"] boolValue];
         NSString *name=outgoing ? JML(@"Вы") : JMName(self.contacts[self.selectedPeer] ?: @{@"aimId":self.selectedPeer ?: @""});
         NSString *delivery=JMString(message[@"delivery"]), *deliveryText=@"";
-        if (outgoing) { if ([delivery isEqual:@"pending"]) deliveryText=JML(@" · Отправляется…"); else if ([delivery isEqual:@"accepted"]) deliveryText=JML(@" · Принято сервером"); else if ([delivery isEqual:@"failed"]) deliveryText=JML(@" · Не отправлено · правый щелчок для повтора"); else if ([delivery isEqual:@"unknown"]) deliveryText=JML(@" · Подтверждение не получено · возможен повтор"); }
+        if (outgoing) { if ([delivery isEqual:@"pending"]) deliveryText=JML(@" · Отправляется…"); else if ([delivery isEqual:@"accepted"]) deliveryText=JML(@" · Принято сервером"); else if ([delivery isEqual:@"failed"]) deliveryText=JML(@" · Не отправлено"); else if ([delivery isEqual:@"unknown"]) deliveryText=JML(@" · Подтверждение не получено"); }
         if ([self.history isBookmarkedID:message[@"id"] peer:self.selectedPeer]) deliveryText=[@" ★" stringByAppendingString:deliveryText];
         NSString *heading=[NSString stringWithFormat:JMTheme()==JMThemeMac2011 ? @"%@\t%@%@\n" : @"%@  %@%@\n",name,[date stringFromDate:sentAt],deliveryText];
         NSMutableAttributedString *header=[[NSMutableAttributedString alloc] initWithString:heading attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:MAX(10,self.chatPreferences.size-2)],NSForegroundColorAttributeName:JMSecondaryTextColor(),NSParagraphStyleAttributeName:headingStyle,NSToolTipAttributeName:[NSString stringWithFormat:@"%@ · %@",name,[fullDate stringFromDate:sentAt]]}];
         [header addAttributes:@{NSFontAttributeName:self.chatPreferences.headingFont,NSForegroundColorAttributeName:outgoing ? [NSColor colorWithCalibratedRed:0.25 green:0.35 blue:0.5 alpha:1] : (JMTheme()==JMThemePro2003 ? [NSColor colorWithCalibratedRed:0.55 green:0.05 blue:0.05 alpha:1] : [NSColor colorWithCalibratedRed:0.16 green:0.42 blue:0.17 alpha:1])} range:NSMakeRange(0,name.length)];
         if (JMTheme()==JMThemeMac2011) [header addAttributes:@{NSFontAttributeName:JMThemeFont(self.chatPreferences.headingFont,self.chatPreferences.family),NSForegroundColorAttributeName:outgoing ? [NSColor colorWithCalibratedRed:0.15 green:0.39 blue:0.12 alpha:1] : [NSColor colorWithCalibratedWhite:0.19 alpha:1]} range:NSMakeRange(0,name.length)];
+        if ([self canRetryMessage:message]) {
+            NSUInteger end=header.length-1;
+            NSString *action=[@" · " stringByAppendingString:JML(@"Повторить отправку…")];
+            [header insertAttributedString:[[NSAttributedString alloc] initWithString:action attributes:[header attributesAtIndex:end effectiveRange:NULL]] atIndex:end];
+            [header addAttribute:NSLinkAttributeName value:[NSURL URLWithString:@"jimmmac-action:retry"] range:NSMakeRange(end+3,action.length-3)];
+        }
         [text appendAttributedString:header];
         NSString *plain=JMString(message[@"text"]);
 
@@ -2792,7 +3018,8 @@ static NSString *JMState(NSDictionary *contact) {
     self.renderingTranscript=NO; [self updateUnreadControls];
 }
 - (void)controlTextDidChange:(NSNotification *)notification {
-    if (notification.object==self.searchField) [self reloadContacts];
+    if (notification.object==self.quickChatSearch) [self filterQuickChats:nil];
+    else if (notification.object==self.searchField) [self reloadContacts];
     else if (notification.object==self.historySearchField) [self searchHistory:nil];
 }
 - (void)textDidChange:(NSNotification *)notification {
@@ -2838,11 +3065,13 @@ static NSString *JMState(NSDictionary *contact) {
     else if (self.draftSaveError) hint=JML(@"Не удалось сохранить черновики на этом Mac");
     else if (self.sending) hint=JML(@"Отправляем… Новый текст останется в черновике");
     else if (bytes>4000) hint=[NSString stringWithFormat:JML(@"Текст: %lu / 4000 байт UTF-8 — разделите сообщение"),(unsigned long)bytes];
-    else if (!self.client.connected) hint=hasText && self.draftStore ? (self.draftsPending ? JML(@"Нет связи · Сохраняем черновик…") : JML(@"Нет связи · Черновик сохранён на этом Mac")) : JML(@"Можно писать черновик. Отправка — после подключения.");
+    else if (!self.client.connected) hint=JMTheme()!=JMThemeCurrent && !self.offlineMode && self.connectionStatus.length ? self.connectionStatus : (hasText && self.draftStore ? (self.draftsPending ? JML(@"Нет связи · Сохраняем черновик…") : JML(@"Нет связи · Черновик сохранён на этом Mac")) : JML(@"Можно писать черновик. Отправка — после подключения."));
     else if (hasText && self.draftStore) hint=self.draftsPending ? JML(@"Сохраняем черновик…") : [NSString stringWithFormat:JML(@"Черновик сохранён · %@ — отправить"),shortcut];
     self.composerHint.stringValue=hint;
     self.composerHint.textColor=self.draftSaveError || bytes>4000 ? [NSColor redColor] : JMSecondaryTextColor();
     self.composerHint.toolTip=self.draftSaveError ? [NSString stringWithFormat:JML(@"%@. Текст остаётся в окне; скопируйте его перед выходом. %@"),hint,self.draftSaveError.localizedDescription] : hint;
+    if ([hint isEqual:self.connectionStatus])
+        self.composerHint.toolTip=[NSString stringWithFormat:@"%@\n%@",hint,JML(@"Можно писать черновик. Отправка — после подключения.")];
     self.composer.toolTip=[NSString stringWithFormat:JML(@"%@ — отправить. %@ Черновики автоматически сохраняются на этом Mac. Лимит сообщения — 4000 байт UTF-8."),shortcut,self.chatPreferences.sendWithCommandReturn ? JML(@"Enter — новая строка.") : JML(@"Shift+Enter — новая строка.")];
     self.sendButton.toolTip=[NSString stringWithFormat:JML(@"Отправить сообщение выбранному собеседнику (%@)"),shortcut];
 }
@@ -2865,6 +3094,19 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
     if (textView.hasMarkedText) return NO;
+    if (control==self.quickChatSearch) {
+        if (command==@selector(insertNewline:)) { [self openQuickChatResult:nil]; return YES; }
+        if (command==@selector(moveDown:) || command==@selector(moveUp:)) {
+            NSInteger count=(NSInteger)self.quickChatResults.count;
+            if (count>0) {
+                NSInteger step=command==@selector(moveDown:) ? 1 : -1;
+                NSInteger row=MAX(0,MIN(count-1,self.quickChatTable.selectedRow+step));
+                [self.quickChatTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row] byExtendingSelection:NO];
+                [self.quickChatTable scrollRowToVisible:row];
+            }
+            return YES;
+        }
+    }
     if (control==self.uinField && command==@selector(insertNewline:)) { [self.loginWindow makeFirstResponder:self.passwordField]; return YES; }
     if (control==self.searchField && (command==@selector(moveDown:) || command==@selector(insertNewline:))) {
         if (self.visibleContacts.count) {
@@ -2887,13 +3129,24 @@ static NSString *JMState(NSDictionary *contact) {
     [self.conversationPeers addObject:peer]; [self persistConversationPeers];
     [self transmitRecord:record clearsDraft:YES];
 }
-- (void)retryMessage:(NSMenuItem *)sender {
-    NSDictionary *message=[self messageForAction:sender];
-    if (!message || self.sending || !self.client.connected || self.sendNotBefore.timeIntervalSinceNow>0 || ![@[@"failed",@"unknown"] containsObject:JMString(message[@"delivery"])]) return;
+- (BOOL)canRetryMessage:(NSDictionary *)message {
+    return self.client.connected && !self.sending && !self.dataOperationInProgress &&
+        self.sendNotBefore.timeIntervalSinceNow<=0 && [message[@"outgoing"] boolValue] &&
+        [@[@"failed",@"unknown"] containsObject:JMString(message[@"delivery"])];
+}
+- (void)retryMessage:(NSMenuItem *)sender { [self confirmRetryMessage:[self messageForAction:sender]]; }
+- (void)confirmRetryMessage:(NSDictionary *)message {
+    if (![self canRetryMessage:message]) return;
+    JMHistory *history=self.history;
+    NSString *peer=self.selectedPeer;
+    NSString *identifier=message[@"id"];
+    NSUInteger generation=self.conversationGeneration;
     NSAlert *alert=[[NSAlert alloc] init]; alert.messageText=JML(@"Повторить отправку сообщения?");
     alert.informativeText=[message[@"delivery"] isEqual:@"unknown"] ? JML(@"Предыдущее сообщение могло дойти до собеседника. Сначала проверьте переписку: повторная отправка может создать дубликат.") : JML(@"Сообщение будет отправлено ещё раз. Текущий черновик останется без изменений.");
     [alert addButtonWithTitle:JML(@"Отправить ещё раз")]; NSButton *cancel=[alert addButtonWithTitle:JML(@"Отмена")]; cancel.keyEquivalent=@"\e";
-    if ([alert runModal]==NSAlertFirstButtonReturn) [self transmitRecord:message clearsDraft:NO];
+    if ([alert runModal]!=NSAlertFirstButtonReturn || generation!=self.conversationGeneration || ![peer isEqual:self.selectedPeer]) return;
+    NSDictionary *latest=[history messageWithID:identifier peer:peer];
+    if ([self canRetryMessage:latest]) [self transmitRecord:latest clearsDraft:NO];
 }
 - (void)transmitRecord:(NSDictionary *)record clearsDraft:(BOOL)clearsDraft {
     if (self.sending || !self.client.connected || self.sendNotBefore.timeIntervalSinceNow>0) return;
@@ -2918,7 +3171,7 @@ static NSString *JMState(NSDictionary *contact) {
             NSError *saveError=nil; [history setDelivery:uncertain ? @"unknown" : @"failed" forID:identifier peer:peer error:&saveError];
             if ([error.domain isEqualToString:JMAPIErrorDomain] && (error.code==430 || error.code==429)) {
                 NSTimeInterval delay=MAX(1,[error.userInfo[@"retryAfter"] doubleValue]); self.sendNotBefore=[NSDate dateWithTimeIntervalSinceNow:delay];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)((delay+0.1)*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ if (generation==self.conversationGeneration) [self updateSendButton]; });
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)((delay+0.1)*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ if (generation==self.conversationGeneration) { [self updateSendButton]; [self renderTranscript]; } });
             }
             NSString *detail=uncertain ? JML(@"Подтверждение не получено. Сообщение могло дойти; проверьте переписку перед повторной отправкой.") : error.localizedDescription;
             if (clearsDraft && ![current hasPrefix:text]) {
@@ -3210,6 +3463,7 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)completeTermination { [NSApp replyToApplicationShouldTerminate:YES]; }
 - (BOOL)windowShouldClose:(id)sender {
+    if (sender==self.quickChatWindow) { [self closeQuickChat:nil]; return NO; }
     if (sender==self.chatWindow || sender==self.rosterWindow) [self flushDrafts];
     // Closing a chat window keeps long polling and sound alerts alive, as on Mac.
     [sender orderOut:nil]; return NO;

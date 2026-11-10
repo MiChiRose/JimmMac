@@ -431,10 +431,30 @@ Finder на самом Mac: `~/Desktop/JimmMac-Mavericks/build/JimmMac.app`.
 - Выход из сети отправляет best-effort endSession. При аварийном завершении сессия
   автоматически истечёт по серверному таймауту.
 
+## Тесты на современном Mac
+
+С установленными Xcode Command Line Tools запустите тесты в архитектуре текущего Mac.
+
+```sh
+JIMMMAC_NATIVE_TESTS=1 bash scripts/test.sh
+JIMMMAC_NATIVE_TESTS=1 JIMMMAC_IMPROVEMENTS_ONLY=1 bash scripts/ui-smoke.sh
+python3 scripts/check-localization.py
+```
+
+Для тестов интерфейса нужен графический сеанс. Снимки и тестовые бинарники
+попадают в `build/native-tests`. Нативный режим пропускает интеграцию со
+старой файловой Связкой ключей и проверку положительного сценария старого
+Security.framework на архивной цепочке GitHub. Проверки обоих сетевых путей
+используют тестовые ответы. Для проверки на Mavericks запускайте те же
+скрипты без `JIMMMAC_NATIVE_TESTS`.
+
 ## Сборка DMG
 
-Единое приложение собирается Xcode 5.1.1 или 6.2 на Mavericks с target 10.8. DMG можно упаковать
-на современном Mac из готового Intel `.app`; приложение при этом не пересобирается.
+На современном Mac команда `bash scripts/build.sh modern` собирает универсальный
+`.app` с минимумом macOS 10.13 для Intel и macOS 11 для Apple Silicon. У каждой
+архитектуры свой минимальный релиз в исполняемом файле и в Info.plist.
+Для OS X 10.8 используйте `bash scripts/build.sh legacy` с Xcode 5.1.1 или 6.2.
+Упаковщик принимает оба вида готового приложения.
 В изолированном окружении Python 3 установите `scripts/requirements-dmg.txt`, затем:
 
 ```sh
