@@ -3,8 +3,8 @@
   "schema": 1,
   "id": "jimm-mac",
   "name": "JimmMac",
-  "summary": "ICQ-клиент Jimm.online для Intel и Apple Silicon Mac. Доступна сборка для старых Intel Mac.",
-  "description": "JimmMac возвращает переписку по UIN на Intel и Apple Silicon Mac. На странице выпуска 0.17.0 доступны две сборки. Для старых Intel Mac подойдёт сборка с OS X 10.8–macOS 10.13. Универсальная сборка рассчитана на Intel с macOS 10.13 и новее и Apple Silicon с macOS 11 и новее.\n\nЕсть контакты и группы, уведомления, аватары, поиск, закреплённые переписки и офлайн-история. Интерфейс доступен на русском, английском, украинском и белорусском. Пять оформлений включают классические темы QIP и Jimm с анимированными смайликами.",
+  "summary": "ICQ-клиент Jimm.online. Intel Mac с OS X 10.8 и новее, Apple Silicon с macOS 11 и новее.",
+  "description": "JimmMac поддерживает Intel Mac с OS X 10.8 и новее и Apple Silicon с macOS 11 и новее. В релизе 0.17.0 два установщика. Для старых Intel Mac с OS X 10.8–macOS 10.13 есть отдельная сборка. Универсальная сборка подходит для Intel начиная с High Sierra и Apple Silicon начиная с Big Sur.\n\nЕсть контакты и группы, уведомления, аватары, поиск, закреплённые переписки и офлайн-история. Интерфейс доступен на русском, английском, украинском и белорусском. Пять оформлений включают классические темы QIP и Jimm с анимированными смайликами.",
   "icon": "https://raw.githubusercontent.com/MiChiRose/JimmMac/main/Resources/JimmStoreIcon.png",
   "screenshots": [
     "https://raw.githubusercontent.com/MiChiRose/JimmMac/v0.15.0/screenshots/UI-chat-polished.png",
