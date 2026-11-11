@@ -28,6 +28,7 @@
 @end
 #import <ImageIO/ImageIO.h>
 #import <math.h>
+#include <sys/utsname.h>
 
 @interface JMAppDelegate (SmokeAccess)
 - (void)toggleGroup:(NSString *)group;
@@ -55,6 +56,12 @@
 - (void)renderTranscript;
 - (void)toggleFavorite:(id)sender;
 - (void)togglePinConversation:(id)sender;
+- (void)toggleArchiveConversation:(id)sender;
+- (void)showArchive:(id)sender;
+- (void)showScheduledBackup:(id)sender;
+- (void)closeScheduledBackup:(id)sender;
+- (void)scheduledBackupTick:(id)sender;
+- (void)runScheduledBackupNow:(id)sender;
 - (void)showQuickChat:(id)sender;
 - (void)toggleOnlineFilter:(id)sender;
 - (void)toggleFavoritesFilter:(id)sender;

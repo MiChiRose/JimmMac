@@ -137,6 +137,17 @@ static void ManualUpdateAndAnimationUI(SmokeDelegate *delegate, NSString *output
     CheckUI(checker.checks==5 && [delegate valueForKey:@"pendingUpdateRelease"]==nil,
         "a manually dismissed check does not turn into a background notice");
 
+    NSURL *legacy=[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/download/v0.18.0/JimmMac-0.18.0-macos10.8-10.13-x86_64.dmg"];
+    NSURL *universal=[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/download/v0.18.0/JimmMac-0.18.0-macos10.13plus-universal.dmg"];
+    checker.releaseInfo=@{@"version":@"0.18.0",@"url":[NSURL URLWithString:@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.18.0"],@"legacyInstaller":legacy,@"universalInstaller":universal};
+    [delegate checkForUpdates:nil];
+    [checker finish];
+    CheckUI([action.title isEqual:@"Скачать DMG"],"a compatible installer gets a download button");
+    [action performClick:nil];
+    struct utsname system;
+    BOOL olderSystem=uname(&system)==0 && atoi(system.release)<17;
+    CheckUI([delegate.openedURL isEqual:(olderSystem ? legacy : universal)],"the download button opens this Mac's installer");
+
     NSString *saved=JMThemeIdentifier();
     for (NSString *theme in @[@"jimm",@"qip",@"mac2011",@"pro2003"]) {
         JMSetTheme(theme);
@@ -291,6 +302,85 @@ static void RetroUpgradeUI(SmokeDelegate *delegate, NSString *output) {
 }
 @end
 
+static void ArchiveAndBackupUI(SmokeDelegate *delegate, NSString *output) {
+    UIClient *client=[delegate valueForKey:@"client"];
+    NSString *account=[delegate valueForKey:@"accountUIN"];
+    NSString *archiveKey=[@"ArchivedPeers." stringByAppendingString:account];
+    NSMenuItem *archive=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(toggleArchiveConversation:) keyEquivalent:@""];
+    archive.representedObject=@"16001";
+    NSDictionary *incoming=Incoming(@"archive-first",@"16001",@"Архивная фраза");
+    [delegate client:client receivedMessage:incoming];
+    [delegate toggleArchiveConversation:archive];
+    CheckUI([[testAlertDefaults arrayForKey:archiveKey] containsObject:@"16001"] &&
+        ![[[delegate valueForKey:@"visibleContacts"] valueForKey:@"aimId"] containsObject:@"16001"],
+        "archiving saves the account preference and removes the chat from the main list");
+    [delegate showArchive:nil];
+    CheckUI([[[delegate valueForKey:@"visibleContacts"] valueForKey:@"aimId"] containsObject:@"16001"],
+        "an archived chat remains visible in the archive");
+    [delegate showArchive:nil];
+    [delegate toggleUnreadFilter:nil];
+    [delegate showHistorySearch:nil];
+    [[delegate valueForKey:@"historyScopePopup"] selectItemAtIndex:0];
+    [[delegate valueForKey:@"historyDateCheckbox"] setState:NSOffState];
+    [[delegate valueForKey:@"historyBookmarkCheckbox"] setState:NSOffState];
+    [[delegate valueForKey:@"historySearchField"] setStringValue:@"Архивная фраза"];
+    [delegate searchHistory:nil];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+    while (![[delegate valueForKey:@"historyResults"] count] && deadline.timeIntervalSinceNow>0) PumpUI(0.02);
+    CheckUI([[delegate valueForKey:@"historyResults"] count]==1,"history search finds messages in the archive");
+    [delegate openHistoryResult:nil];
+    CheckUI([[delegate valueForKey:@"showingArchive"] boolValue] && [[delegate valueForKey:@"selectedPeer"] isEqual:@"16001"] &&
+        [[[delegate valueForKey:@"visibleContacts"] valueForKey:@"aimId"] containsObject:@"16001"],
+        "opening the history result switches to the archived conversation");
+    [delegate client:client receivedMessage:incoming];
+    CheckUI([[testAlertDefaults arrayForKey:archiveKey] containsObject:@"16001"],"replayed messages leave a chat archived");
+    [delegate client:client receivedMessage:Incoming(@"archive-next",@"16001",@"Сообщение после архивации")];
+    CheckUI(![[testAlertDefaults arrayForKey:archiveKey] containsObject:@"16001"] &&
+        ![[[delegate valueForKey:@"visibleContacts"] valueForKey:@"aimId"] containsObject:@"16001"],
+        "a new incoming message returns the conversation to the active list");
+    [delegate showArchive:nil];
+    [delegate toggleArchiveConversation:archive];
+
+    NSString *folder=[output stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+    NSFileManager *manager=[NSFileManager defaultManager];
+    CheckUI([manager createDirectoryAtPath:folder withIntermediateDirectories:NO attributes:nil error:NULL],"backup fixture directory is ready");
+    NSString *unrelated=[folder stringByAppendingPathComponent:@"manual.jimmbackup"];
+    CheckUI([@"manual backup fixture" writeToFile:unrelated atomically:YES encoding:NSUTF8StringEncoding error:NULL],"manual fixture exists beside scheduled copies");
+    NSString *key=[@"ScheduledBackup." stringByAppendingString:account];
+    [testAlertDefaults setObject:@{@"path":folder,@"days":@7,@"last":[NSDate date]} forKey:key];
+    [delegate showScheduledBackup:nil];
+    NSWindow *window=[delegate valueForKey:@"scheduledBackupWindow"];
+    CheckUI(window.isVisible,"scheduled backups have a settings window");
+    CheckUtilityBounds(window);
+    [delegate scheduledBackupTick:nil];
+    CheckUI(![[delegate valueForKey:@"scheduledBackupRunning"] boolValue],"the weekly schedule skips a recent successful backup");
+    [testAlertDefaults setObject:@{@"path":folder,@"days":@7,@"last":[NSDate dateWithTimeIntervalSinceNow:-8*86400]} forKey:key];
+    [delegate scheduledBackupTick:nil];
+    deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+    while ([[delegate valueForKey:@"scheduledBackupRunning"] boolValue] && deadline.timeIntervalSinceNow>0) PumpUI(0.02);
+    CheckUI(![[delegate valueForKey:@"scheduledBackupRunning"] boolValue],"a due backup finishes without blocking the AppKit event loop");
+    NSString *first=[[testAlertDefaults dictionaryForKey:key][@"files"] firstObject];
+    NSURL *firstURL=[NSURL fileURLWithPath:[folder stringByAppendingPathComponent:first ?: @"missing"]];
+    NSDictionary *manifest=[JMHistory backupManifestAtURL:firstURL error:NULL];
+    CheckUI(first.length>0,"the successful backup filename is recorded");
+    CheckUI([manifest[@"uin"] isEqual:account] && [manifest[@"preferences"][@"ArchivedPeers"] containsObject:@"16001"],
+        "a due backup is restorable and includes the archived conversation");
+    CheckUI([testAlertDefaults dictionaryForKey:key][@"last"] && [[[delegate valueForKey:@"scheduledBackupStatus"] stringValue] hasPrefix:@"Последняя копия:"],
+        "the scheduled backup window shows its last completion time");
+    for (NSUInteger i=0;i<5;i++) {
+        [delegate runScheduledBackupNow:nil];
+        deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+        while ([[delegate valueForKey:@"scheduledBackupRunning"] boolValue] && deadline.timeIntervalSinceNow>0) PumpUI(0.02);
+    }
+    CheckUI([[testAlertDefaults dictionaryForKey:key][@"files"] count]==5 &&
+        [manager contentsOfDirectoryAtPath:folder error:NULL].count==6 && ![manager fileExistsAtPath:firstURL.path] &&
+        [manager fileExistsAtPath:unrelated],"rotation retains five scheduled snapshots and preserves manual backups");
+    [delegate closeScheduledBackup:nil];
+    [testAlertDefaults removeObjectForKey:key];
+    [manager removeItemAtPath:folder error:NULL];
+    [delegate toggleArchiveConversation:archive];
+}
+
 static void ConversationNavigationUI(SmokeDelegate *delegate, NSString *output) {
     UIClient *client=[delegate valueForKey:@"client"];
     NSWindow *chat=[delegate valueForKey:@"chatWindow"];
@@ -378,6 +468,8 @@ static void ConversationNavigationUI(SmokeDelegate *delegate, NSString *output) 
     [delegate changeAppearance:appearance];
     [delegate markAllRead:nil];
     Draft(delegate,composer,@"");
+    ArchiveAndBackupUI(delegate,output);
+    [delegate markAllRead:nil];
     [chat makeKeyAndOrderFront:nil];
     delegate.forcedReading=@YES;
 }

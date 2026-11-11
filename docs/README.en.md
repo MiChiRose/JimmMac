@@ -3,7 +3,7 @@
   <h1>JimmMac</h1>
   <p><b>A familiar flower. An older Mac. A new conversation.</b></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.17.0-5a9638" alt="Version 0.17.0" />
+    <img src="https://img.shields.io/badge/version-0.17.1-5a9638" alt="Version 0.17.1" />
     <img src="https://img.shields.io/badge/status-public%20testing-d59b35" alt="Public testing" />
     <img src="https://img.shields.io/badge/architecture-Intel%20%2B%20Apple%20Silicon-687b8c" alt="Intel + Apple Silicon" />
   </p>
@@ -31,11 +31,11 @@ in Russian, English, Ukrainian and Belarusian.
 
 | Download | What to choose |
 | --- | --- |
-| [Universal DMG 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.dmg) | Intel on macOS 10.13 or later, Apple silicon on macOS 11 or later. |
-| [Universal ZIP 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.zip) | The same application in a ZIP archive. |
-| [Legacy Intel DMG 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.8-10.13-x86_64.dmg) | For Intel Macs with OS X 10.8–macOS 10.13. |
-| [Legacy Intel ZIP 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.8-10.13-x86_64.zip) | The same build in a ZIP archive. |
-| [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.17.0) | Changes and checksums for 0.17.0. |
+| [Universal DMG 0.17.1](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.13plus-universal.dmg) | Intel on macOS 10.13 or later, Apple silicon on macOS 11 or later. |
+| [Universal ZIP 0.17.1](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.13plus-universal.zip) | The same application in a ZIP archive. |
+| [Legacy Intel DMG 0.17.1](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.8-10.13-x86_64.dmg) | For Intel Macs with OS X 10.8–macOS 10.13. |
+| [Legacy Intel ZIP 0.17.1](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.8-10.13-x86_64.zip) | The same build in a ZIP archive. |
+| [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.17.1) | Changes and checksums for 0.17.1. |
 
 Open the DMG and drag JimmMac into Applications. Quit the running app before
 replacing it. The Universal build uses an ad hoc signature.
@@ -72,6 +72,12 @@ after restarting the application.
 </p>
 
 </details>
+
+## New in 0.17.1
+
+- The update window offers a direct download for the installer that fits your Mac.
+- Open archived conversations from the View menu. History search includes archived messages, and new incoming messages bring the conversation back to the main list.
+- File → Automatic Backups saves history, drafts and preferences daily or weekly while JimmMac is open.
 
 ## New in 0.17.0
 
@@ -209,9 +215,9 @@ the full target range.
 
 | Build | Verification |
 | --- | --- |
-| 0.17.0 for Apple silicon | Launch and focused UI checks on **macOS 27.2**. Requires macOS 11 or later. |
-| 0.17.0 for Intel | Intel code launched under Rosetta on macOS 27.2. Requires macOS 10.13 or later. |
-| 0.17.0 for older Intel Macs | DMG, app tests and update checks verified on **OS X 10.9.5**. Requires OS X 10.8 or later. |
+| 0.17.1 for Apple silicon | Launch and focused UI checks on **macOS 27.2**. Requires macOS 11 or later. |
+| 0.17.1 for Intel | Intel code launched under Rosetta on macOS 27.2. Requires macOS 10.13 or later. |
+| 0.17.1 for older Intel Macs | DMG, app tests and update checks verified on **OS X 10.9.5**. Requires OS X 10.8 or later. |
 
 Testing on physical Intel Macs with 10.13 or later is still pending.
 See [VALIDATION.md](../VALIDATION.md) for coverage and limitations.

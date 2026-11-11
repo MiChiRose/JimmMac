@@ -18,6 +18,10 @@
 #import "JMTheme.h"
 #import "JMLocalization.h"
 #import <float.h>
+#import <sys/utsname.h>
+#import <sys/stat.h>
+#import <unistd.h>
+#import <errno.h>
 #import "JMDiagnostics.h"
 #import "JMAutoAway.h"
 #import <ApplicationServices/ApplicationServices.h>
@@ -45,6 +49,10 @@ static NSButton *JMButton(NSString *title, NSRect frame, id target, SEL action) 
     return button;
 }
 static void JMSetLabel(NSTextField *label, NSString *text) { [label setStringValue:text ?: @""]; [label setToolTip:text]; }
+static NSInteger JMDarwinMajor(void) {
+    struct utsname system;
+    return uname(&system)==0 ? [[NSString stringWithUTF8String:system.release] integerValue] : 0;
+}
 static NSButton *JMCheckbox(NSString *title, NSRect frame, id target, SEL action) {
     NSButton *button=[[NSButton alloc] initWithFrame:frame]; [button setButtonType:NSSwitchButton];
     button.title=title; button.font=[NSFont systemFontOfSize:13]; button.target=target; button.action=action; button.toolTip=title; return button;
@@ -125,6 +133,19 @@ static NSString *JMState(NSDictionary *contact) {
 @property(nonatomic,strong) NSProgressIndicator *updateProgress;
 @property(nonatomic,strong) NSButton *updateAction;
 @property(nonatomic,strong) NSURL *updateReleaseURL;
+@property(nonatomic) BOOL showingArchive;
+@property(nonatomic,strong) NSMutableSet *archivedPeers;
+@property(nonatomic,strong) JMPanel *scheduledBackupWindow;
+@property(nonatomic,strong) NSPopUpButton *scheduledBackupInterval;
+@property(nonatomic,strong) NSTextField *scheduledBackupFolder;
+@property(nonatomic,strong) NSTextField *scheduledBackupStatus;
+@property(nonatomic,strong) NSTextField *scheduledBackupActivity;
+@property(nonatomic,strong) NSButton *scheduledBackupChoose;
+@property(nonatomic,strong) NSButton *scheduledBackupNow;
+@property(nonatomic,strong) NSTimer *scheduledBackupTimer;
+@property(nonatomic,strong) NSDate *scheduledBackupRetry;
+@property(nonatomic,copy) NSString *scheduledBackupError;
+@property(nonatomic) BOOL scheduledBackupRunning;
 @property(nonatomic,strong) NSTimer *updateTimer;
 @property(nonatomic,strong) NSDate *updateRetryDate;
 @property(nonatomic,strong) NSDictionary *pendingUpdateRelease;
@@ -311,7 +332,9 @@ static NSString *JMState(NSDictionary *contact) {
 @implementation JMAppDelegate
 - (void)updateHistoricalTabs {
     if (!self.themeConversationTabs || JMTheme()!=JMThemeMac2011) return;
-    NSMutableArray *peers=[[self.conversationPeers allObjects] mutableCopy];
+    NSMutableSet *active=[self.conversationPeers mutableCopy];
+    [active minusSet:self.archivedPeers];
+    NSMutableArray *peers=[[active allObjects] mutableCopy];
     [peers sortUsingComparator:^NSComparisonResult(NSString *a,NSString *b) { return [JMName(self.contacts[a] ?: @{@"aimId":a}) localizedCaseInsensitiveCompare:JMName(self.contacts[b] ?: @{@"aimId":b})]; }];
     if (self.selectedPeer.length && ![peers containsObject:self.selectedPeer]) [peers addObject:self.selectedPeer];
     NSMutableArray *tabs=[NSMutableArray arrayWithArray:[peers subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)4,peers.count))]];
@@ -376,6 +399,7 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)toggleUnreadFilter:(id)sender {
     self.unreadOnly=!(self.unreadOnly && self.sectionControl.selectedSegment==1);
+    self.showingArchive=NO;
     if (self.sectionControl.selectedSegment!=1) { self.sectionControl.selectedSegment=1; [self changeSection:nil]; }
     else [self reloadContacts];
     [[self listWindow] makeKeyAndOrderFront:nil];
@@ -387,7 +411,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSDictionary *contact=self.visibleContacts[(NSUInteger)row];
     NSString *group=[self historicalGroupForContact:contact];
     if (row>0 && [group isEqual:[self historicalGroupForContact:self.visibleContacts[(NSUInteger)row-1]]]) return nil;
-    if (conversations) return group;
+    if (conversations) return self.showingArchive ? JML(@"Архив переписок") : group;
     return [NSString stringWithFormat:@"%@ %@  %@",contact[@"_collapsedGroup"] ? @"▸" : @"▾",group,self.visibleGroupCounts[group] ?: @""];
 }
 - (CGFloat)headerHeightForRow:(NSInteger)row {
@@ -589,11 +613,16 @@ static NSString *JMState(NSDictionary *contact) {
     }
     return !self.terminating;
 }
+- (NSDictionary *)backupManifestForAccount:(NSString *)uin {
+    return @{@"format":@"JimmMacBackup",@"version":@1,@"uin":uin,
+        @"createdAt":@([NSDate date].timeIntervalSince1970),@"drafts":[self draftSnapshot],
+        @"roster":[self rosterSnapshot],@"preferences":[JMAccountData preferencesForUIN:uin defaults:self.loginDefaults]};
+}
 - (void)createBackup:(id)sender {
     if (!self.history || self.dataOperationInProgress || self.sending) return;
     [self flushDrafts]; if (![self canLeaveDrafts]) return;
     NSString *uin=self.accountUIN; JMHistory *history=self.history;
-    NSDictionary *manifest=@{@"format":@"JimmMacBackup",@"version":@1,@"uin":uin,@"createdAt":@([NSDate date].timeIntervalSince1970),@"drafts":[self draftSnapshot],@"roster":[self rosterSnapshot],@"preferences":[JMAccountData preferencesForUIN:uin defaults:self.loginDefaults]};
+    NSDictionary *manifest=[self backupManifestForAccount:uin];
     NSSavePanel *panel=[NSSavePanel savePanel]; panel.allowedFileTypes=@[@"jimmbackup"]; panel.canCreateDirectories=YES; panel.nameFieldStringValue=[NSString stringWithFormat:@"JimmMac-%@.jimmbackup",uin]; panel.title=JML(@"Сохранить резервную копию");
     [panel beginSheetModalForWindow:[self listWindow] completionHandler:^(NSInteger result) {
         if (result!=NSFileHandlingPanelOKButton) return;
@@ -605,6 +634,187 @@ static NSString *JMState(NSDictionary *contact) {
             });
         });
     }];
+}
+- (NSString *)scheduledBackupKeyForAccount:(NSString *)uin {
+    return [@"ScheduledBackup." stringByAppendingString:uin ?: @""];
+}
+- (NSDictionary *)scheduledBackupSettings {
+    return JMDictionary([self.loginDefaults objectForKey:[self scheduledBackupKeyForAccount:self.accountUIN]]);
+}
+- (void)saveScheduledBackupSettings:(NSDictionary *)settings {
+    [self.loginDefaults setObject:settings forKey:[self scheduledBackupKeyForAccount:self.accountUIN]];
+    [self.loginDefaults synchronize];
+    self.scheduledBackupRetry=nil;
+    self.scheduledBackupError=nil;
+    [self refreshScheduledBackupWindow];
+    [self scheduledBackupTick:nil];
+}
+- (void)showScheduledBackup:(id)sender {
+    if (![self canNavigateConversations]) return;
+    if (!self.scheduledBackupWindow) {
+        NSRect frame=NSMakeRect(0,0,540,316);
+        self.scheduledBackupWindow=[[JMPanel alloc] initWithContentRect:frame styleMask:NSTitledWindowMask|NSClosableWindowMask backing:NSBackingStoreBuffered defer:NO];
+        self.scheduledBackupWindow.title=JML(@"Автоматические копии");
+        self.scheduledBackupWindow.releasedWhenClosed=NO;
+        self.scheduledBackupWindow.delegate=self;
+        self.scheduledBackupWindow.contentView=[[JMWindowView alloc] initWithFrame:frame];
+        NSView *root=self.scheduledBackupWindow.contentView;
+        [root addSubview:JMLabel(JML(@"Периодичность"),NSMakeRect(20,223,165,24),13,YES)];
+        self.scheduledBackupInterval=[[JMThemedPopUpButton alloc] initWithFrame:NSMakeRect(187,220,185,28) pullsDown:NO];
+        [self.scheduledBackupInterval addItemsWithTitles:@[JML(@"Выключено"),JML(@"Раз в день"),JML(@"Раз в неделю")]];
+        self.scheduledBackupInterval.target=self;
+        self.scheduledBackupInterval.action=@selector(scheduledBackupIntervalChanged:);
+        [root addSubview:self.scheduledBackupInterval];
+        [root addSubview:JMLabel(JML(@"Папка резервных копий"),NSMakeRect(20,191,350,24),13,YES)];
+        self.scheduledBackupFolder=JMLabel(@"",NSMakeRect(20,160,341,25),12,NO);
+        [self.scheduledBackupFolder.cell setLineBreakMode:NSLineBreakByTruncatingMiddle];
+        [root addSubview:self.scheduledBackupFolder];
+        self.scheduledBackupChoose=JMButton(JML(@"Выбрать папку…"),NSMakeRect(367,156,153,30),self,@selector(chooseScheduledBackupFolder:));
+        [root addSubview:self.scheduledBackupChoose];
+        self.scheduledBackupStatus=JMLabel(@"",NSMakeRect(20,124,500,23),12,NO);
+        [root addSubview:self.scheduledBackupStatus];
+        self.scheduledBackupActivity=JMLabel(@"",NSMakeRect(20,102,500,23),12,NO);
+        [self.scheduledBackupActivity.cell setLineBreakMode:NSLineBreakByTruncatingTail];
+        [root addSubview:self.scheduledBackupActivity];
+        NSTextField *help=JMLabel(JML(@"JimmMac хранит последние пять автоматических копий.\nКопии создаются, пока приложение открыто."),NSMakeRect(20,53,500,43),12,NO);
+        [help.cell setWraps:YES];
+        [root addSubview:help];
+        self.scheduledBackupNow=JMButton(JML(@"Создать копию сейчас"),NSMakeRect(20,13,212,32),self,@selector(runScheduledBackupNow:));
+        [root addSubview:self.scheduledBackupNow];
+        NSButton *close=JMButton(JML(@"Закрыть"),NSMakeRect(406,13,114,32),self,@selector(closeScheduledBackup:));
+        close.keyEquivalent=@"\e";
+        [root addSubview:close];
+        [self.scheduledBackupWindow center];
+    }
+    JMDecorateUtilityWindow(self.scheduledBackupWindow,JML(@"Автоматические копии"));
+    [self refreshScheduledBackupWindow];
+    [self.scheduledBackupWindow makeKeyAndOrderFront:nil];
+}
+- (void)closeScheduledBackup:(id)sender { [self.scheduledBackupWindow orderOut:nil]; }
+- (void)refreshScheduledBackupWindow {
+    if (!self.scheduledBackupWindow) return;
+    NSDictionary *settings=[self scheduledBackupSettings];
+    NSInteger days=[settings[@"days"] integerValue];
+    [self.scheduledBackupInterval selectItemAtIndex:days==7 ? 2 : (days==1 ? 1 : 0)];
+    NSString *path=JMString(settings[@"path"]);
+    JMSetLabel(self.scheduledBackupFolder,path.length ? path : JML(@"Папка не выбрана"));
+    NSDate *last=[settings[@"last"] isKindOfClass:[NSDate class]] ? settings[@"last"] : nil;
+    NSDateFormatter *formatter=[[NSDateFormatter alloc] init];
+    formatter.locale=JMLocale();
+    formatter.dateStyle=NSDateFormatterMediumStyle;
+    formatter.timeStyle=NSDateFormatterShortStyle;
+    NSString *lastLabel=last ? [NSString stringWithFormat:JML(@"Последняя копия: %@"),[formatter stringFromDate:last]] : JML(@"Копий по расписанию пока нет.");
+    JMSetLabel(self.scheduledBackupStatus,lastLabel);
+    JMSetLabel(self.scheduledBackupActivity,self.scheduledBackupRunning ? JML(@"Создаём резервную копию…") : (self.scheduledBackupError ?: @""));
+    BOOL editable=[self canNavigateConversations] && !self.scheduledBackupRunning;
+    self.scheduledBackupInterval.enabled=editable;
+    self.scheduledBackupChoose.enabled=editable;
+    self.scheduledBackupNow.enabled=editable && path.length && !self.sending;
+}
+- (void)scheduledBackupIntervalChanged:(id)sender {
+    if (self.scheduledBackupRunning || ![self canNavigateConversations]) return;
+    NSInteger index=self.scheduledBackupInterval.indexOfSelectedItem;
+    NSMutableDictionary *settings=[[self scheduledBackupSettings] mutableCopy];
+    settings[@"days"]=@(index==2 ? 7 : (index==1 ? 1 : 0));
+    [self saveScheduledBackupSettings:settings];
+}
+- (void)chooseScheduledBackupFolder:(id)sender {
+    if (self.scheduledBackupRunning || ![self canNavigateConversations]) return;
+    NSString *account=self.accountUIN;
+    NSOpenPanel *panel=[NSOpenPanel openPanel];
+    panel.title=JML(@"Выбрать папку резервных копий");
+    panel.canChooseDirectories=YES;
+    panel.canChooseFiles=NO;
+    panel.canCreateDirectories=YES;
+    panel.allowsMultipleSelection=NO;
+    NSString *current=JMString([self scheduledBackupSettings][@"path"]);
+    if (current.length) panel.directoryURL=[NSURL fileURLWithPath:current isDirectory:YES];
+    [panel beginSheetModalForWindow:self.scheduledBackupWindow completionHandler:^(NSInteger result) {
+        if (result!=NSFileHandlingPanelOKButton || ![account isEqual:self.accountUIN] || self.scheduledBackupRunning || ![self canNavigateConversations]) return;
+        NSString *path=panel.URL.path.stringByResolvingSymlinksInPath;
+        if (!path.length || [path isEqual:current]) return;
+        NSMutableDictionary *settings=[[self scheduledBackupSettings] mutableCopy];
+        settings[@"path"]=path;
+        [settings removeObjectForKey:@"last"];
+        [settings removeObjectForKey:@"files"];
+        [self saveScheduledBackupSettings:settings];
+    }];
+}
+- (void)scheduledBackupTick:(NSTimer *)timer { [self runScheduledBackupIfDue:YES]; }
+- (void)runScheduledBackupNow:(id)sender { [self runScheduledBackupIfDue:NO]; }
+- (void)runScheduledBackupIfDue:(BOOL)dueOnly {
+    if (self.terminating || self.sending || self.scheduledBackupRunning || ![self canNavigateConversations]) return;
+    NSDictionary *settings=[self scheduledBackupSettings];
+    NSString *path=JMString(settings[@"path"]);
+    if (!path.isAbsolutePath) return;
+    NSInteger days=[settings[@"days"] integerValue];
+    NSDate *last=[settings[@"last"] isKindOfClass:[NSDate class]] ? settings[@"last"] : nil;
+    if (dueOnly && ((days!=1 && days!=7) || self.scheduledBackupRetry.timeIntervalSinceNow>0 ||
+                    (last && -last.timeIntervalSinceNow < days*86400 && last.timeIntervalSinceNow<=0))) return;
+    if (self.scheduledBackupWindow.attachedSheet) return;
+    if (self.draftSaveError) {
+        self.scheduledBackupError=JML(@"Копия отложена из-за ошибки сохранения черновиков.");
+        self.scheduledBackupRetry=[NSDate dateWithTimeIntervalSinceNow:600];
+        [self refreshScheduledBackupWindow];
+        return;
+    }
+    NSString *account=self.accountUIN;
+    NSString *key=[self scheduledBackupKeyForAccount:account];
+    JMHistory *history=self.history;
+    NSDictionary *manifest=[self backupManifestForAccount:account];
+    NSURL *folder=[NSURL fileURLWithPath:path isDirectory:YES];
+    NSString *prefix=[NSString stringWithFormat:@"JimmMac-auto-%@-",account];
+    NSString *suffix=@".jimmbackup";
+    NSString *name=[NSString stringWithFormat:@"%@%@%@",prefix,[[NSUUID UUID] UUIDString],suffix];
+    NSURL *file=[folder URLByAppendingPathComponent:name];
+    self.scheduledBackupRunning=YES;
+    self.scheduledBackupError=nil;
+    [self refreshScheduledBackupWindow];
+    dispatch_async(self.historySearchQueue,^{
+        NSError *error=nil;
+        BOOL saved=[history writeBackupToURL:file manifest:manifest error:&error];
+        NSMutableArray *files=[NSMutableArray array];
+        BOOL pruneFailed=NO;
+        if (saved) {
+            for (NSString *old in JMArray(settings[@"files"])) {
+                if (![old isKindOfClass:[NSString class]] || ![old hasPrefix:prefix] || ![old hasSuffix:suffix] ||
+                    old.length!=prefix.length+36+suffix.length) continue;
+                if (![files containsObject:old] && [[NSUUID alloc] initWithUUIDString:[old substringWithRange:NSMakeRange(prefix.length,36)]]) [files addObject:old];
+            }
+            [files addObject:name];
+            NSUInteger excess=files.count>5 ? files.count-5 : 0;
+            for (NSUInteger i=excess;i>0;i--) {
+                NSURL *old=[folder URLByAppendingPathComponent:files[i-1]];
+                struct stat entry;
+                if (lstat(old.path.fileSystemRepresentation,&entry)!=0) {
+                    if (errno==ENOENT) [files removeObjectAtIndex:i-1];
+                    else pruneFailed=YES;
+                } else if (!S_ISREG(entry.st_mode) || unlink(old.path.fileSystemRepresentation)==0 || errno==ENOENT) {
+                    [files removeObjectAtIndex:i-1];
+                } else pruneFailed=YES;
+            }
+        }
+        dispatch_async(dispatch_get_main_queue(),^{
+            self.scheduledBackupRunning=NO;
+            if (saved) {
+                NSMutableDictionary *updated=[settings mutableCopy];
+                updated[@"last"]=[NSDate date];
+                updated[@"files"]=files;
+                [self.loginDefaults setObject:updated forKey:key];
+                [self.loginDefaults synchronize];
+            }
+            if ([account isEqual:self.accountUIN]) {
+                if (!saved) {
+                    self.scheduledBackupRetry=[NSDate dateWithTimeIntervalSinceNow:600];
+                    self.scheduledBackupError=[NSString stringWithFormat:@"%@ %@",JML(@"Не удалось создать резервную копию"),error.localizedDescription ?: @""];
+                } else {
+                    self.scheduledBackupRetry=nil;
+                    self.scheduledBackupError=pruneFailed ? JML(@"Копия сохранена. Часть старых копий не удалось удалить.") : nil;
+                }
+            }
+            [self refreshScheduledBackupWindow];
+        });
+    });
 }
 - (void)restoreBackup:(id)sender {
     if (self.dataOperationInProgress || self.sending) return;
@@ -653,6 +863,8 @@ static NSString *JMState(NSDictionary *contact) {
             self.favoritePeers=[NSMutableSet setWithArray:JMArray(preferences[@"FavoritePeers"])]; self.mutedPeers=[NSMutableSet setWithArray:JMArray(preferences[@"MutedPeers"])];
             self.pinnedPeers=[NSMutableSet setWithArray:JMArray(preferences[@"PinnedPeers"])];
             [self.conversationPeers unionSet:self.pinnedPeers];
+            [self.archivedPeers setSet:[NSSet setWithArray:JMArray(preferences[@"ArchivedPeers"])]];
+            [self.conversationPeers unionSet:self.archivedPeers];
             [self.conversationPeers addObjectsFromArray:JMArray(preferences[@"ConversationPeers"])]; [self persistConversationPeers];
             self.favoritesOnlyCheckbox.state=[preferences[@"FavoritesOnly"] boolValue] ? NSOnState : NSOffState;
             self.chatPreferences=[[JMChatPreferences alloc] initWithDefaults:self.loginDefaults]; [self applyChatFont];
@@ -694,6 +906,30 @@ static NSString *JMState(NSDictionary *contact) {
     [self.loginDefaults setObject:self.pinnedPeers.allObjects forKey:[@"PinnedPeers." stringByAppendingString:self.accountUIN]];
     [self.loginDefaults synchronize];
     [self reloadContacts];
+}
+- (void)persistArchivedPeers {
+    if (self.accountUIN.length) {
+        [self.loginDefaults setObject:self.archivedPeers.allObjects forKey:[@"ArchivedPeers." stringByAppendingString:self.accountUIN]];
+        [self.loginDefaults synchronize];
+    }
+}
+- (void)toggleArchiveConversation:(id)sender {
+    NSString *peer=[self contactForAction:sender];
+    if (!self.history || !self.accountUIN.length || self.dataOperationInProgress || ![self.conversationPeers containsObject:peer]) return;
+    if ([self.archivedPeers containsObject:peer]) [self.archivedPeers removeObject:peer];
+    else {
+        [self.archivedPeers addObject:peer];
+        [self.notificationAlerts clearPeer:peer];
+    }
+    [self persistArchivedPeers];
+    [self reloadContacts];
+    [self updateDockBadge];
+}
+- (void)showArchive:(id)sender {
+    if (![self canNavigateConversations]) return;
+    self.showingArchive=!(self.showingArchive && self.sectionControl.selectedSegment==1);
+    self.unreadOnly=NO;
+    [self showSection:1];
 }
 - (void)toggleOnlineFilter:(id)sender {
     if (![sender isKindOfClass:[NSButton class]]) self.onlineOnlyCheckbox.state=self.onlineOnlyCheckbox.state==NSOnState ? NSOffState : NSOnState;
@@ -811,7 +1047,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.updateWindow displayIfNeeded];
     [self checkUpdatesAutomatically:NO];
 }
-- (void)finishManualUpdateWithTitle:(NSString *)title detail:(NSString *)detail releaseURL:(NSURL *)url retry:(BOOL)retry {
+- (void)finishManualUpdateWithTitle:(NSString *)title detail:(NSString *)detail releaseURL:(NSURL *)url installer:(BOOL)installer retry:(BOOL)retry {
     [self.updateProgress stopAnimation:nil];
     self.updateProgress.hidden=YES;
     JMSetLabel(self.updateHeading,title);
@@ -819,7 +1055,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.updateDetail scrollRangeToVisible:NSMakeRange(0,0)];
     self.updateReleaseURL=url;
     self.updateAction.hidden=!url && !retry;
-    if (url || retry) self.updateAction.title=url ? JML(@"Открыть релиз") : JML(@"Повторить");
+    if (url || retry) self.updateAction.title=installer ? JML(@"Скачать DMG") : (url ? JML(@"Открыть релиз") : JML(@"Повторить"));
 }
 
 - (void)checkUpdatesAutomatically:(BOOL)automatic {
@@ -834,7 +1070,7 @@ static NSString *JMState(NSDictionary *contact) {
             if (automatic) self.updateRetryDate=[NSDate dateWithTimeIntervalSinceNow:3600];
             if (manualVisible) [self finishManualUpdateWithTitle:JML(@"Не удалось проверить обновления")
                 detail:JML(@"Проверьте подключение к интернету и повторите позже. Релизы также доступны на github.com/MiChiRose/JimmMac.")
-                releaseURL:nil retry:YES];
+                releaseURL:nil installer:NO retry:YES];
             return;
         }
         self.updateRetryDate=nil;
@@ -854,18 +1090,21 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)presentUpdateRelease:(NSDictionary *)release automatic:(BOOL)automatic {
     NSString *current=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.16.0";
     BOOL newer=[JMUpdateChecker compareVersion:release[@"version"] to:current]==NSOrderedDescending;
+    NSURL *installer=newer ? [JMUpdateChecker installerForRelease:release darwinMajor:JMDarwinMajor()] : nil;
+    NSURL *destination=newer ? (installer ?: release[@"url"]) : nil;
     NSString *title=newer ? [NSString stringWithFormat:JML(@"Доступен JimmMac %@"),release[@"version"]] : JML(@"У вас актуальная версия JimmMac");
     NSString *notes=JMString(release[@"notes"]); if (notes.length>1600) notes=[[notes substringToIndex:1600] stringByAppendingString:@"…"];
     NSString *detail=newer ? [NSString stringWithFormat:JML(@"Установлена версия %@.\n\n%@\n\nСкачайте обновление на GitHub. Установка выполняется вручную."),current,notes] : [NSString stringWithFormat:JML(@"Установлена %@. Последний опубликованный релиз — %@."),current,release[@"version"]];
+    if (installer) detail=[NSString stringWithFormat:@"%@\n\n%@",[NSString stringWithFormat:JML(@"Установщик для этого Mac: %@"),installer.lastPathComponent],detail];
     if (!automatic) {
-        [self finishManualUpdateWithTitle:title detail:detail releaseURL:newer ? release[@"url"] : nil retry:NO];
+        [self finishManualUpdateWithTitle:title detail:detail releaseURL:destination installer:installer!=nil retry:NO];
         return;
     }
     NSAlert *alert=[[NSAlert alloc] init];
     alert.messageText=title; alert.informativeText=detail;
-    [alert addButtonWithTitle:newer ? JML(@"Открыть релиз") : JML(@"Хорошо")];
+    [alert addButtonWithTitle:installer ? JML(@"Скачать DMG") : (newer ? JML(@"Открыть релиз") : JML(@"Хорошо"))];
     if (newer) { NSButton *cancel=[alert addButtonWithTitle:JML(@"Позже")]; cancel.keyEquivalent=@"\e"; }
-    if ([alert runModal]==NSAlertFirstButtonReturn && newer) [self openExternalURL:release[@"url"]];
+    if ([alert runModal]==NSAlertFirstButtonReturn && destination) [self openExternalURL:destination];
 }
 - (void)exportConversation:(NSMenuItem *)sender {
     if (!self.selectedPeer.length || !self.history || self.exportingHistory) return;
@@ -895,7 +1134,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.draftSaveQueue=dispatch_queue_create("online.jimm.drafts",DISPATCH_QUEUE_SERIAL);
     self.contacts = [NSMutableDictionary dictionary]; self.drafts = [NSMutableDictionary dictionary]; self.unread = [NSMutableDictionary dictionary];
     self.serverContactIDs = [NSMutableSet set]; self.conversationPeers = [NSMutableSet set];
-    self.serverGroups=[NSMutableArray array]; self.favoritePeers=[NSMutableSet set]; self.pinnedPeers=[NSMutableSet set]; self.mutedPeers=[NSMutableSet set]; self.transcriptTail=YES;
+    self.serverGroups=[NSMutableArray array]; self.favoritePeers=[NSMutableSet set]; self.pinnedPeers=[NSMutableSet set]; self.archivedPeers=[NSMutableSet set]; self.mutedPeers=[NSMutableSet set]; self.transcriptTail=YES;
     self.ownInfo=[NSMutableDictionary dictionary]; self.profileDates=[NSMutableDictionary dictionary]; self.profileTexts=[NSMutableDictionary dictionary]; self.incomingTyping=[NSMutableDictionary dictionary];
     if (JMFlowerImage()) [NSApp setApplicationIconImage:JMFlowerImage()];
     [self createMenu]; [self createLoginWindow]; [self createChatWindow];
@@ -907,6 +1146,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.autoAway=[[JMAutoAway alloc] init];
     self.autoAwayTimer=[NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(autoAwayTick:) userInfo:nil repeats:YES];
     [self startAutomaticLogin]; [self scheduleAutomaticUpdateChecks];
+    self.scheduledBackupTimer=[NSTimer scheduledTimerWithTimeInterval:60 target:self selector:@selector(scheduledBackupTick:) userInfo:nil repeats:YES];
 }
 - (JMLoginStore *)makeLoginStore { return [[JMLoginStore alloc] init]; }
 - (NSUserDefaults *)makeLoginDefaults { return [NSUserDefaults standardUserDefaults]; }
@@ -945,7 +1185,7 @@ static NSString *JMState(NSDictionary *contact) {
         NSMenuItem *item=[file addItemWithTitle:entry[@"title"] action:@selector(exportConversation:) keyEquivalent:@""]; item.target=self; item.representedObject=entry[@"format"];
     }
     [file addItem:[NSMenuItem separatorItem]];
-    for (NSDictionary *entry in @[@{@"title":JML(@"Открыть историю офлайн…"),@"action":@"openOfflineHistory:"},@{@"title":JML(@"Создать резервную копию…"),@"action":@"createBackup:"},@{@"title":JML(@"Восстановить резервную копию…"),@"action":@"restoreBackup:"}]) { NSMenuItem *item=[file addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self; }
+    for (NSDictionary *entry in @[@{@"title":JML(@"Открыть историю офлайн…"),@"action":@"openOfflineHistory:"},@{@"title":JML(@"Создать резервную копию…"),@"action":@"createBackup:"},@{@"title":JML(@"Автоматические копии…"),@"action":@"showScheduledBackup:"},@{@"title":JML(@"Восстановить резервную копию…"),@"action":@"restoreBackup:"}]) { NSMenuItem *item=[file addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self; }
     fileItem.submenu=file; [bar addItem:fileItem];
     NSMenuItem *editItem = [[NSMenuItem alloc] initWithTitle:JML(@"Правка") action:NULL keyEquivalent:@""];
     NSMenu *edit = [[NSMenu alloc] initWithTitle:JML(@"Правка")];
@@ -973,6 +1213,7 @@ static NSString *JMState(NSDictionary *contact) {
     }
     NSMenuItem *unreadFilter=[viewMenu addItemWithTitle:JML(@"Только непрочитанные") action:@selector(toggleUnreadFilter:) keyEquivalent:@"U"]; unreadFilter.target=self;
     unreadFilter.keyEquivalentModifierMask=NSCommandKeyMask|NSShiftKeyMask;
+    NSMenuItem *archive=[viewMenu addItemWithTitle:JML(@"Архив переписок") action:@selector(showArchive:) keyEquivalent:@""]; archive.target=self;
     NSMenuItem *quickChat=[viewMenu addItemWithTitle:JML(@"Перейти к переписке…") action:@selector(showQuickChat:) keyEquivalent:@"k"];
     quickChat.target=self;
     NSMenuItem *nextUnread=[viewMenu addItemWithTitle:JML(@"Следующая непрочитанная переписка") action:@selector(openNextUnread:) keyEquivalent:@"u"];
@@ -992,6 +1233,7 @@ static NSString *JMState(NSDictionary *contact) {
     for (NSDictionary *entry in @[@{@"title":JML(@"Добавить по UIN…"),@"action":@"addContact:"},@{@"title":JML(@"Переименовать контакт…"),@"action":@"renameContact:"},@{@"title":JML(@"Переместить в группу…"),@"action":@"moveContact:"},@{@"title":JML(@"Удалить из контактов…"),@"action":@"removeContact:"}]) {
         NSMenuItem *item=[contactsMenu addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self;
     }
+    NSMenuItem *archiveConversation=[contactsMenu addItemWithTitle:JML(@"Убрать в архив") action:@selector(toggleArchiveConversation:) keyEquivalent:@""]; archiveConversation.target=self;
     NSMenuItem *pin=[contactsMenu addItemWithTitle:JML(@"Закрепить переписку") action:@selector(togglePinConversation:) keyEquivalent:@""];
     pin.target=self;
     NSMenuItem *favorite=[contactsMenu addItemWithTitle:JML(@"Добавить в избранное") action:@selector(toggleFavorite:) keyEquivalent:@""]; favorite.target=self;
@@ -1218,7 +1460,7 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)openTelegraphica:(id)sender { [self openExternalURL:JMTelegraphicaURL()]; }
 - (void)showContactsSection:(id)sender { [self showSection:0]; }
-- (void)showConversationsSection:(id)sender { [self showSection:1]; }
+- (void)showConversationsSection:(id)sender { self.showingArchive=NO; [self showSection:1]; }
 - (void)showSection:(NSInteger)section {
     if (!self.history) return;
     [self.sectionControl setSelectedSegment:section]; [self changeSection:nil];
@@ -1363,6 +1605,7 @@ static NSString *JMState(NSDictionary *contact) {
     for (NSDictionary *entry in @[@{@"title":JML(@"Открыть переписку"),@"action":@"writeContact:"},@{@"title":JML(@"Профиль"),@"action":@"profileContact:"},@{@"title":JML(@"Переименовать…"),@"action":@"renameContact:"},@{@"title":JML(@"Переместить в группу…"),@"action":@"moveContact:"},@{@"title":JML(@"Удалить из контактов…"),@"action":@"removeContact:"}]) {
         NSMenuItem *item=[self.contactMenu addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self;
     }
+    NSMenuItem *archiveContext=[self.contactMenu addItemWithTitle:JML(@"Убрать в архив") action:@selector(toggleArchiveConversation:) keyEquivalent:@""]; archiveContext.target=self;
     NSMenuItem *pinContext=[self.contactMenu addItemWithTitle:JML(@"Закрепить переписку") action:@selector(togglePinConversation:) keyEquivalent:@""];
     pinContext.target=self;
     NSMenuItem *favoriteContext=[self.contactMenu addItemWithTitle:JML(@"Добавить в избранное") action:@selector(toggleFavorite:) keyEquivalent:@""]; favoriteContext.target=self;
@@ -1641,12 +1884,12 @@ static NSString *JMState(NSDictionary *contact) {
     NSString *peer=row>=0 && row<(NSInteger)self.visibleContacts.count ? self.visibleContacts[(NSUInteger)row][@"aimId"] : nil;
     for (NSMenuItem *item in menu.itemArray) {
         item.representedObject=peer ?: (id)[NSNull null];
-        if (item.action==@selector(togglePinConversation:)) item.hidden=self.sectionControl.selectedSegment!=1;
+        if (item.action==@selector(togglePinConversation:) || item.action==@selector(toggleArchiveConversation:)) item.hidden=self.sectionControl.selectedSegment!=1;
     }
 }
 - (void)writeContact:(id)sender {
     NSString *peer=[self contactForAction:sender]; if (!JMValidUIN(peer)) return;
-    [self.sectionControl setSelectedSegment:1]; [self changeSection:nil]; [self selectPeer:peer];
+    [self openConversationPeer:peer];
 }
 - (void)profileContact:(id)sender {
     NSString *peer=[self contactForAction:sender]; if (!JMValidUIN(peer)) return;
@@ -2090,6 +2333,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSInteger row=self.historyTable.selectedRow;
     if (row<0 || row>=(NSInteger)self.historyResults.count) return;
     NSDictionary *message=self.historyResults[(NSUInteger)row]; NSString *peer=message[@"peer"];
+    self.showingArchive=[self.archivedPeers containsObject:peer];
     [self.sectionControl setSelectedSegment:1]; [self changeSection:nil]; [self selectPeer:peer];
     self.highlightedMessageID=message[@"id"]; self.historyHighlightQuery=self.historyResultsQuery;
     [self setTranscriptAroundID:message[@"id"]];
@@ -2247,7 +2491,20 @@ static NSString *JMState(NSDictionary *contact) {
     if (item.action==@selector(renameContact:) || item.action==@selector(removeContact:) || item.action==@selector(moveContact:)) return [self canChangeRoster] && [self.serverContactIDs containsObject:[self contactForAction:item]];
     if (item.action==@selector(writeContact:) || item.action==@selector(profileContact:)) return JMValidUIN([self contactForAction:item]);
     if (item.action==@selector(addContact:)) return [self canChangeRoster];
-    if (item.action==@selector(openNextUnread:)) return [self canNavigateConversations] && self.unread.count>0;
+    if (item.action==@selector(openNextUnread:)) {
+        if (![self canNavigateConversations]) return NO;
+        for (NSString *peer in self.unread) if (![self.archivedPeers containsObject:peer] && [self.unread[peer] integerValue]>0) return YES;
+        return NO;
+    }
+    if (item.action==@selector(showArchive:)) {
+        item.state=self.showingArchive && self.sectionControl.selectedSegment==1 ? NSOnState : NSOffState;
+        return [self canNavigateConversations];
+    }
+    if (item.action==@selector(toggleArchiveConversation:)) {
+        NSString *peer=[self contactForAction:item];
+        item.title=[self.archivedPeers containsObject:peer] ? JML(@"Вернуть из архива") : JML(@"Убрать в архив");
+        return [self canNavigateConversations] && [self.conversationPeers containsObject:peer];
+    }
     if (item.action==@selector(showQuickChat:)) return [self canNavigateConversations];
     if (item.action==@selector(togglePinConversation:)) {
         NSString *peer=[self contactForAction:item];
@@ -2270,6 +2527,7 @@ static NSString *JMState(NSDictionary *contact) {
         return [item.representedObject isEqualToString:@"enabled"] || self.audioAlerts.enabled;
     }
     if (item.action==@selector(logout:)) return self.accountUIN.length>0 && !self.dataOperationInProgress;
+    if (item.action==@selector(showScheduledBackup:)) return [self canNavigateConversations];
     if (item.action==@selector(createBackup:)) return self.history && !self.dataOperationInProgress && !self.sending;
     if (item.action==@selector(restoreBackup:) || item.action==@selector(openOfflineHistory:)) return !self.dataOperationInProgress && !self.sending;
     if (item.action==@selector(toggleMuteConversation:)) { NSString *peer=[self contactForAction:item]; BOOL muted=[self.mutedPeers containsObject:peer]; item.title=muted ? JML(@"Включить уведомления") : JML(@"Отключить уведомления"); item.state=muted ? NSOnState : NSOffState; return self.history && JMValidUIN(peer); }
@@ -2298,7 +2556,9 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (BOOL)prepareLoginUIForUIN:(NSString *)uin {
     [self closeQuickChat:nil];
-    self.loginAttemptSerial++; self.connectionStatus=nil; self.unreadOnly=NO; self.changingPrivacy=NO; self.restoringMessages=NO; self.restoreAfterReconnect=NO;
+    [self closeScheduledBackup:nil];
+    self.scheduledBackupRetry=nil; self.scheduledBackupError=nil;
+    self.loginAttemptSerial++; self.connectionStatus=nil; self.unreadOnly=NO; self.showingArchive=NO; self.changingPrivacy=NO; self.restoringMessages=NO; self.restoreAfterReconnect=NO;
     [self.historyWindow orderOut:nil]; self.historySearchGeneration++; self.historyResults=@[]; [self.historyTable reloadData]; [self.historySearchField setStringValue:@""];
     self.offlineMode=NO; self.onlineOnlyCheckbox.enabled=YES;
     if ([self.presencePopup.lastItem.representedObject isEqual:@"offline-local"]) [self.presencePopup removeItemAtIndex:self.presencePopup.numberOfItems-1];
@@ -2320,9 +2580,11 @@ static NSString *JMState(NSDictionary *contact) {
     JMSetLabel(self.presenceFeedback,@""); self.connectedSince=nil; self.wasConnected=NO;
     for (id peer in JMArray([self.loginDefaults objectForKey:[@"ConversationPeers." stringByAppendingString:uin]]))
         if (JMValidUIN(JMString(peer))) [self.conversationPeers addObject:JMString(peer)];
-    NSArray *pins=JMArray([JMAccountData preferencesForUIN:uin defaults:self.loginDefaults][@"PinnedPeers"]);
-    [self.pinnedPeers setSet:[NSSet setWithArray:pins]];
+    NSDictionary *preferences=[JMAccountData preferencesForUIN:uin defaults:self.loginDefaults];
+    [self.pinnedPeers setSet:[NSSet setWithArray:JMArray(preferences[@"PinnedPeers"])]];
+    [self.archivedPeers setSet:[NSSet setWithArray:JMArray(preferences[@"ArchivedPeers"])]];
     [self.conversationPeers unionSet:self.pinnedPeers];
+    [self.conversationPeers unionSet:self.archivedPeers];
     [self.conversationPeers addObjectsFromArray:[self.history peers]];
     [self.contactNotice setStringValue:@""];
     [self.composer setString:@""]; [self.composer.undoManager removeAllActions]; [self.transcript setString:@""];
@@ -2420,7 +2682,9 @@ static NSString *JMState(NSDictionary *contact) {
     [self.client disconnect]; self.sending = NO; self.sendNotBefore = nil;
     self.accountUIN = nil; self.addingContact = NO; [self.serverContactIDs removeAllObjects]; [self.conversationPeers removeAllObjects];
     [self closeQuickChat:nil];
-    self.history = nil; self.offlineMode=NO; self.selectedPeer = nil; [self.mutedPeers removeAllObjects]; [self.favoritePeers removeAllObjects]; [self.pinnedPeers removeAllObjects]; self.onlineOnlyCheckbox.state=NSOffState; self.favoritesOnlyCheckbox.state=NSOffState; self.sendingLocalID=nil;
+    [self closeScheduledBackup:nil];
+    self.scheduledBackupRetry=nil; self.scheduledBackupError=nil;
+    self.history = nil; self.offlineMode=NO; self.selectedPeer = nil; [self.mutedPeers removeAllObjects]; [self.favoritePeers removeAllObjects]; [self.pinnedPeers removeAllObjects]; [self.archivedPeers removeAllObjects]; self.showingArchive=NO; self.onlineOnlyCheckbox.state=NSOffState; self.favoritesOnlyCheckbox.state=NSOffState; self.sendingLocalID=nil;
     [self.contacts removeAllObjects]; [self.drafts removeAllObjects]; [self.unread removeAllObjects];
     [self.composer setString:@""]; [self.composer.undoManager removeAllActions]; [self.transcript setString:@""]; [self reloadContacts];
     [self updateDockBadge]; [self.audioAlerts stop];
@@ -2464,6 +2728,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.notificationAlerts.accountUIN=nil;
     [self stopOutgoingTyping]; [self.profileWindow orderOut:nil];
     [self closeQuickChat:nil];
+    [self closeScheduledBackup:nil];
     [self.chatWindow orderOut:nil]; [self.rosterWindow orderOut:nil]; [self resetLogin:[error localizedDescription]];
 }
 - (void)client:(JMAPIClient *)client receivedBuddyList:(NSDictionary *)buddyList {
@@ -2521,6 +2786,10 @@ static NSString *JMState(NSDictionary *contact) {
     }
     [self.conversationPeers addObject:peer];
     BOOL incoming=![message[@"outgoing"] boolValue];
+    if (incoming && [self.archivedPeers containsObject:peer]) {
+        [self.archivedPeers removeObject:peer];
+        [self persistArchivedPeers];
+    }
     if (incoming && !reading) self.unread[peer]=@([self.unread[peer] integerValue]+1);
     if (incoming && !quiet && ![self.mutedPeers containsObject:peer]) {
         if (!reading || self.audioAlerts.soundInOpenConversation) [self.audioAlerts playEvent:@"message"];
@@ -2535,7 +2804,7 @@ static NSString *JMState(NSDictionary *contact) {
     return !self.renderingTranscript && self.transcriptOffset+200>=[self.history countForPeer:self.selectedPeer ?: @""] && atBottom && [NSApp isActive] && self.chatWindow.isKeyWindow && self.chatWindow.isVisible && !self.chatWindow.isMiniaturized;
 }
 - (void)updateDockBadge {
-    NSInteger total=0; for (NSNumber *count in [self.unread allValues]) total+=[count integerValue];
+    NSInteger total=0; for (NSString *peer in self.unread) if (![self.archivedPeers containsObject:peer]) total+=[self.unread[peer] integerValue];
     [[NSApp dockTile] setBadgeLabel:total>0 ? [NSString stringWithFormat:@"%ld",(long)total] : nil];
     [self updateUnreadControls];
 }
@@ -2576,8 +2845,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSString *peer=self.pendingNotificationPeer, *account=self.pendingNotificationAccount;
     self.pendingNotificationPeer=nil; self.pendingNotificationAccount=nil;
     if (![self.notificationAlerts.accountUIN isEqualToString:account]) return;
-    if (!self.contacts[peer]) self.contacts[peer]=[@{@"aimId":peer,@"friendly":peer,@"state":@"offline"} mutableCopy];
-    [self.sectionControl setSelectedSegment:1]; [self changeSection:nil]; [self selectPeer:peer];
+    [self openConversationPeer:peer];
     [self showMainWindow:nil]; if (JMTheme()!=JMThemeCurrent) [self.chatWindow makeKeyAndOrderFront:nil]; [self jumpToLatest:nil];
     dispatch_async(dispatch_get_main_queue(),^{ [self markSelectedRead]; });
 }
@@ -2643,6 +2911,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSString *query=[self.quickChatSearch.stringValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSMutableSet *peers=[self.conversationPeers mutableCopy];
     if (query.length) [peers unionSet:self.serverContactIDs];
+    else [peers minusSet:self.archivedPeers];
     NSMutableArray *matches=[NSMutableArray array];
     for (NSString *peer in peers) {
         NSDictionary *contact=self.contacts[peer] ?: @{@"aimId":peer,@"friendly":peer};
@@ -2689,7 +2958,12 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)openConversationPeer:(NSString *)peer {
     if (!self.history || self.dataOperationInProgress || !JMValidUIN(peer)) return;
     if (!self.contacts[peer]) self.contacts[peer]=[@{@"aimId":peer,@"friendly":peer,@"state":@"offline"} mutableCopy];
-    if (self.sectionControl.selectedSegment!=1) { self.sectionControl.selectedSegment=1; [self changeSection:nil]; }
+    BOOL archived=[self.archivedPeers containsObject:peer];
+    if (self.sectionControl.selectedSegment!=1 || self.showingArchive!=archived) {
+        self.showingArchive=archived;
+        self.sectionControl.selectedSegment=1;
+        [self changeSection:nil];
+    }
     if (self.chatWindow.isMiniaturized) [self.chatWindow deminiaturize:nil];
     [self selectPeer:peer];
     [self.chatWindow makeKeyAndOrderFront:nil];
@@ -2699,7 +2973,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSMutableArray *peers=[NSMutableArray array];
     NSMutableDictionary *activity=[NSMutableDictionary dictionary];
     for (NSString *peer in self.unread) {
-        if ([self.unread[peer] integerValue]<=0) continue;
+        if ([self.archivedPeers containsObject:peer] || [self.unread[peer] integerValue]<=0) continue;
         [peers addObject:peer];
         activity[peer]=@([[self.history lastMessageForPeer:peer][@"timestamp"] doubleValue]);
     }
@@ -2710,6 +2984,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSUInteger current=self.selectedPeer ? [peers indexOfObject:self.selectedPeer] : NSNotFound;
     if (!peers.count) return;
     NSString *peer=peers[current==NSNotFound ? 0 : (current+1)%peers.count];
+    if (self.showingArchive) { self.showingArchive=NO; [self changeSection:nil]; }
     if ([peer isEqual:self.selectedPeer]) {
         NSString *first=[self.history firstUnreadIDForPeer:peer];
         if (first) {
@@ -2733,10 +3008,11 @@ static NSString *JMState(NSDictionary *contact) {
     BOOL conversations = [self.sectionControl selectedSegment] == 1;
     NSSet *ids = conversations ? self.conversationPeers : self.serverContactIDs;
     for (NSString *peer in ids) {
+        if (conversations && [self.archivedPeers containsObject:peer]!=self.showingArchive) continue;
         if (conversations && self.unreadOnly && ![self.unread[peer] integerValue]) continue;
         NSDictionary *contact = self.contacts[peer] ?: @{@"aimId":peer, @"friendly":peer, @"state":@"offline"};
-        if (self.onlineOnlyCheckbox.state==NSOnState && ![@[@"online",@"freeForChat",@"away",@"na",@"dnd",@"occupied"] containsObject:JMString(contact[@"state"])]) continue;
-        if (self.favoritesOnlyCheckbox.state==NSOnState && ![self.favoritePeers containsObject:peer]) continue;
+        if (!(conversations && self.showingArchive) && self.onlineOnlyCheckbox.state==NSOnState && ![@[@"online",@"freeForChat",@"away",@"na",@"dnd",@"occupied"] containsObject:JMString(contact[@"state"])]) continue;
+        if (!(conversations && self.showingArchive) && self.favoritesOnlyCheckbox.state==NSOnState && ![self.favoritePeers containsObject:peer]) continue;
         if (!conversations && self.selectedGroup.length && ![JMArray(contact[@"groups"]) containsObject:self.selectedGroup]) continue;
         if (![query length] || [JMName(contact) rangeOfString:query options:NSCaseInsensitiveSearch].location != NSNotFound || [JMString(contact[@"aimId"]) rangeOfString:query].location != NSNotFound) [contacts addObject:contact];
     }
@@ -2790,10 +3066,11 @@ static NSString *JMState(NSDictionary *contact) {
     if (selected >= 0) [self.contactTable selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)selected] byExtendingSelection:NO];
     else [self.contactTable deselectAll:nil];
     self.reloadingContacts = NO;
-    [self.countLabel setStringValue:[NSString stringWithFormat:@"%@: %lu", conversations ? JML(@"Переписок") : JML(@"Контактов"), (unsigned long)contactCount]];
+    [self.countLabel setStringValue:[NSString stringWithFormat:@"%@: %lu", conversations ? (self.showingArchive ? JML(@"Архив переписок") : JML(@"Переписок")) : JML(@"Контактов"), (unsigned long)contactCount]];
     NSString *empty = [query length] ? JML(@"Ничего не найдено.\nПопробуйте другое имя или UIN.") : (conversations ? JML(@"Переписок пока нет.\nВыберите контакт или нажмите «Написать…».") : (self.selectedGroup.length ? JML(@"В этой группе пока нет контактов.\nДобавьте контакт или перенесите его из другой группы.") : JML(@"Контактов пока нет.\nНажмите «Добавить…», чтобы сохранить UIN на сервере.")));
     if (!contacts.count && (self.onlineOnlyCheckbox.state==NSOnState || self.favoritesOnlyCheckbox.state==NSOnState)) empty=JML(@"По выбранным фильтрам никого нет.\nОтключите «Только в сети» или «Избранные».");
     if (!contacts.count && conversations && self.unreadOnly) empty=JML(@"Нет непрочитанных сообщений.");
+    if (conversations && self.showingArchive && !query.length) empty=JML(@"В архиве пока нет переписок.");
     [self.emptyListLabel setStringValue:empty]; [self.emptyListLabel setHidden:[contacts count] > 0];
     [self layoutChatWindow];
 }
@@ -2801,6 +3078,8 @@ static NSString *JMState(NSDictionary *contact) {
     if ([self.accountUIN length]) [self.loginDefaults setObject:[self.conversationPeers allObjects] forKey:[@"ConversationPeers." stringByAppendingString:self.accountUIN]];
 }
 - (void)changeSection:(id)sender {
+    if (self.sectionControl.selectedSegment!=1) self.showingArchive=NO;
+    if (self.showingArchive) self.unreadOnly=NO;
     [self.searchField setStringValue:@""];
     [[self.searchField cell] setPlaceholderString:[self.sectionControl selectedSegment] == 1 ? JML(@"Поиск переписок") : JML(@"Поиск контактов")];
     [self layoutChatWindow]; [self reloadContacts];
@@ -3045,6 +3324,7 @@ static NSString *JMState(NSDictionary *contact) {
     [self.presencePopup setEnabled:self.client.connected && (!self.changingPresence || self.automaticPresenceRequest) && !self.dataOperationInProgress];
     self.presencePopup.toolTip=[NSString stringWithFormat:@"%@\n%@",self.presencePopup.titleOfSelectedItem ?: @"",JML(@"Ваш статус в сети. После изменения клиент проверит его на сервере.")];
     [self.historySearchButton setEnabled:self.history!=nil];
+    if (self.scheduledBackupWindow.isVisible) [self refreshScheduledBackupWindow];
     [self.presenceFeedback setHidden:!self.client.connected];
     self.statusLabel.hidden=JMTheme()!=JMThemeCurrent && self.client.connected && self.presenceFeedback.stringValue.length>0;
     if (JMThemeIsMobile()) self.presencePopup.hidden=!self.client.connected;
@@ -3214,9 +3494,8 @@ static NSString *JMState(NSDictionary *contact) {
     if ([alert runModal] != NSAlertFirstButtonReturn) return;
     NSString *peer = [[field stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!JMValidUIN(peer)) { [self showError:JML(@"Проверьте UIN") detail:JML(@"UIN должен состоять из цифр.")]; return; }
-    if (!self.contacts[peer]) self.contacts[peer] = [@{@"aimId":peer, @"friendly":peer, @"state":@"offline"} mutableCopy];
-    [self.sectionControl setSelectedSegment:1];
-    [self.searchField setStringValue:@""]; [self selectPeer:peer];
+    [self.searchField setStringValue:@""];
+    [self openConversationPeer:peer];
 }
 - (NSAlert *)newAddContactPrompt {
     NSAlert *alert = [self newConversationPrompt]; [alert setMessageText:JML(@"Добавить контакт")];
@@ -3445,12 +3724,14 @@ static NSString *JMState(NSDictionary *contact) {
     if (![NSThread isMainThread]) { [self performSelectorOnMainThread:@selector(workspaceDidWake:) withObject:nil waitUntilDone:NO]; return; }
     if (self.terminating) return;
     if (self.accountUIN.length && !self.offlineMode) [self reconnect:nil]; [self automaticUpdateTick:nil];
+    [self scheduledBackupTick:nil];
 }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     if (self.dataOperationInProgress) { self.quitAfterDataOperation=YES; JMSetLabel(self.statusLabel,JML(@"Завершим копирование и закроем приложение…")); return NSTerminateLater; }
     [self flushDrafts]; [self persistRosterCache]; if (![self canLeaveDrafts]) return NSTerminateCancel;
-    self.terminating=YES; [self.autoAwayTimer invalidate]; self.autoAwayTimer=nil; self.conversationGeneration++; [self.updateTimer invalidate]; self.updateTimer=nil; [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(automaticUpdateTick:) object:nil];
+    self.terminating=YES; [self.scheduledBackupTimer invalidate]; self.scheduledBackupTimer=nil;
+    [self.autoAwayTimer invalidate]; self.autoAwayTimer=nil; self.conversationGeneration++; [self.updateTimer invalidate]; self.updateTimer=nil; [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(automaticUpdateTick:) object:nil];
     [[NSNotificationCenter defaultCenter] removeObserver:self]; [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [self stopOutgoingTyping]; [self.incomingTypingTimer invalidate]; [self.avatars invalidate]; [self.audioAlerts stop]; [self.notificationAlerts invalidate]; [self.client disconnect];
     // Finish this app's queued credentials and export before exit. Never block

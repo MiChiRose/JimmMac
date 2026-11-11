@@ -34,7 +34,7 @@ NSDictionary *JMSafeRoster(NSDictionary *roster) {
     return @{@"contacts":contacts,@"groups":groups,@"serverIDs":UINs(roster[@"serverIDs"]),@"profiles":profiles,@"ownInfo":SafeContact(JMDictionary(roster[@"ownInfo"]),JMString(roster[@"uin"])),@"uin":JMString(roster[@"uin"])};
 }
 static NSArray *GlobalKeys(void) { return @[@"CompactContactList",@"AutoAwayMinutes",@"ChatFontFamily",@"ChatFontSize",@"ChatSendWithCommandReturn",@"ChatEmoticonsEnabled",@"InterfaceLanguage",@"InterfaceAppearance",@"NotificationsEnabled",@"NotificationContentStyle",@"DockAttentionEnabled",@"SoundsEnabled",@"PresenceSoundsEnabled",@"TypingSoundsEnabled",@"SoundInOpenConversation",@"AutomaticallyCheckUpdates"]; }
-static NSArray *AccountKeys(void) { return @[@"FavoritePeers",@"PinnedPeers",@"MutedPeers",@"ConversationPeers",@"OnlineOnly",@"FavoritesOnly"]; }
+static NSArray *AccountKeys(void) { return @[@"FavoritePeers",@"PinnedPeers",@"ArchivedPeers",@"MutedPeers",@"ConversationPeers",@"OnlineOnly",@"FavoritesOnly"]; }
 NSDictionary *JMSafePreferences(NSDictionary *preferences) {
     NSMutableDictionary *safe=[NSMutableDictionary dictionary];
     for (NSString *key in GlobalKeys()) {

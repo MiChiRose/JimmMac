@@ -3,7 +3,7 @@
   <h1>JimmMac</h1>
   <p><b>Знакомый цветок. Любимый Mac. Новый разговор.</b></p>
   <p>
-    <img src="https://img.shields.io/badge/версия-0.17.0-5a9638" alt="Версия 0.17.0" />
+    <img src="https://img.shields.io/badge/версия-0.17.1-5a9638" alt="Версия 0.17.1" />
     <img src="https://img.shields.io/badge/статус-открытое%20тестирование-d59b35" alt="Открытое тестирование" />
     <img src="https://img.shields.io/badge/архитектура-Intel%20%2B%20Apple%20Silicon-687b8c" alt="Intel + Apple Silicon" />
   </p>
@@ -30,11 +30,11 @@ JimmMac — независимый клиент [Jimm.online](https://jimm.onlin
 
 | Загрузка | Что выбрать |
 | --- | --- |
-| [Универсальный DMG 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.dmg) | Intel с macOS 10.13 и новее, Apple Silicon с macOS 11 и новее. |
-| [Универсальный ZIP 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.zip) | То же приложение в ZIP-архиве. |
-| [DMG 0.17.0 для старых Intel Mac](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.8-10.13-x86_64.dmg) | Для Intel с OS X 10.8–macOS 10.13. |
-| [ZIP 0.17.0 для старых Intel Mac](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.8-10.13-x86_64.zip) | Та же сборка в ZIP-архиве. |
-| [Описание релиза и контрольные суммы SHA-256](https://github.com/MiChiRose/JimmMac/releases/tag/v0.17.0) | Изменения и контрольные суммы для 0.17.0. |
+| [Универсальный DMG 0.17.1](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.13plus-universal.dmg) | Intel с macOS 10.13 и новее, Apple Silicon с macOS 11 и новее. |
+| [Универсальный ZIP 0.17.1](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.13plus-universal.zip) | То же приложение в ZIP-архиве. |
+| [DMG 0.17.1 для старых Intel Mac](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.8-10.13-x86_64.dmg) | Для Intel с OS X 10.8–macOS 10.13. |
+| [ZIP 0.17.1 для старых Intel Mac](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.1/JimmMac-0.17.1-macos10.8-10.13-x86_64.zip) | Та же сборка в ZIP-архиве. |
+| [Описание релиза и контрольные суммы SHA-256](https://github.com/MiChiRose/JimmMac/releases/tag/v0.17.1) | Изменения и контрольные суммы для 0.17.1. |
 
 Откройте образ и перетащите JimmMac в «Программы». Перед заменой завершите
 работающее приложение. Универсальная сборка подписана локально, без Developer ID
@@ -71,6 +71,12 @@ JimmMac — независимый клиент [Jimm.online](https://jimm.onlin
 </p>
 
 </details>
+
+## Новое в 0.17.1
+
+- В окне обновлений можно сразу скачать подходящий для Mac установщик.
+- Архив переписок доступен в меню «Вид». Поиск находит сообщения из архива, а новое входящее возвращает чат в основной список.
+- «Файл → Автоматические копии…» сохраняет историю, черновики и настройки ежедневно или еженедельно, пока JimmMac открыт.
 
 ## Новое в 0.17.0
 
@@ -219,9 +225,9 @@ JimmMac — независимый клиент [Jimm.online](https://jimm.onlin
 
 | Сборка | Что проверено |
 | --- | --- |
-| 0.17.0 для Apple Silicon | Запуск и целевые проверки интерфейса на **macOS 27.2**. Минимум macOS 11. |
-| 0.17.0 для Intel | Запуск Intel-кода через Rosetta на macOS 27.2. Минимум macOS 10.13. |
-| 0.17.0 для старых Intel Mac | DMG, тесты приложения и проверка обновлений на **OS X 10.9.5**. Минимум OS X 10.8. |
+| 0.17.1 для Apple Silicon | Запуск и целевые проверки интерфейса на **macOS 27.2**. Минимум macOS 11. |
+| 0.17.1 для Intel | Запуск Intel-кода через Rosetta на macOS 27.2. Минимум macOS 10.13. |
+| 0.17.1 для старых Intel Mac | DMG, тесты приложения и проверка обновлений на **OS X 10.9.5**. Минимум OS X 10.8. |
 
 Проверки на реальных Intel Mac с 10.13 и новее ещё нужны. Список проверок
 и ограничения приведены в [VALIDATION.md](VALIDATION.md).

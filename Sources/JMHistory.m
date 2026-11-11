@@ -273,10 +273,16 @@ static void Contains(sqlite3_context *context,int argc,sqlite3_value **values) {
     if (ok) ok=sqlite3_exec(writer,"DELETE FROM metadata WHERE key!='migration'",NULL,NULL,NULL)==SQLITE_OK && sqlite3_prepare_v2(writer,"INSERT INTO metadata(key,value) VALUES('backupManifest',?)",-1,&s,NULL)==SQLITE_OK;
     if (ok) { Bind(s,1,[[NSString alloc] initWithData:metadata encoding:NSUTF8StringEncoding]); ok=sqlite3_step(s)==SQLITE_DONE; } sqlite3_finalize(s);
     // A portable backup must not depend on WAL sidecars, especially on pre-3.22 SQLite.
-    if (ok) ok=sqlite3_exec(writer,"PRAGMA journal_mode=DELETE",NULL,NULL,NULL)==SQLITE_OK;
+    s=NULL;
+    if (ok) ok=sqlite3_prepare_v2(writer,"PRAGMA journal_mode=DELETE",-1,&s,NULL)==SQLITE_OK &&
+        sqlite3_step(s)==SQLITE_ROW && [SQLText(s,0) isEqual:@"delete"];
+    sqlite3_finalize(s);
     if (reader) sqlite3_close(reader); if (writer) sqlite3_close(writer);
+    NSFileManager *files=[NSFileManager defaultManager];
+    for (NSString *suffix in @[@"-journal",@"-wal",@"-shm"])
+        [files removeItemAtPath:[temporary.path stringByAppendingString:suffix] error:NULL];
     if (ok) ok=rename(temporary.path.fileSystemRepresentation,url.path.fileSystemRepresentation)==0;
-    if (!ok) { [[NSFileManager defaultManager] removeItemAtURL:temporary error:NULL]; [[NSFileManager defaultManager] removeItemAtPath:[temporary.path stringByAppendingString:@"-journal"] error:NULL]; if (error && !*error) *error=HistoryError(); } return ok;
+    if (!ok) { [files removeItemAtURL:temporary error:NULL]; if (error && !*error) *error=HistoryError(); } return ok;
 }
 + (NSDictionary *)backupManifestAtURL:(NSURL *)url error:(NSError **)error {
     if (!url.isFileURL || !url.path.length) { if (error) *error=HistoryError(); return nil; }

@@ -384,6 +384,26 @@ int main(void) {
         Check([JMUpdateChecker compareVersion:@"0.13.0" to:@"0.12.9"]==NSOrderedDescending && [JMUpdateChecker compareVersion:@"0.9" to:@"0.12"]==NSOrderedAscending && [JMUpdateChecker compareVersion:@"1.2" to:@"1.2.0"]==NSOrderedSame,@"update versions compare numerically, not lexicographically");
         NSDictionary *release=@{@"tag_name":@"v0.13.0",@"html_url":@"https://github.com/MiChiRose/JimmMac/releases/tag/v0.13.0",@"draft":@NO,@"prerelease":@NO,@"body":@"Fixture release"};
         Check([[JMUpdateChecker releaseFromData:[NSJSONSerialization dataWithJSONObject:release options:0 error:NULL] error:NULL][@"version"] isEqual:@"0.13.0"],@"valid stable release is parsed");
+        NSString *legacyName=@"JimmMac-0.13.0-macos10.8-10.13-x86_64.dmg";
+        NSString *universalName=@"JimmMac-0.13.0-macos10.13plus-universal.dmg";
+        NSString *download=@"https://github.com/MiChiRose/JimmMac/releases/download/v0.13.0/";
+        NSString *legacyURL=[download stringByAppendingString:legacyName];
+        NSString *universalURL=[download stringByAppendingString:universalName];
+        NSDictionary *legacyAsset=@{@"name":legacyName,@"state":@"uploaded",@"browser_download_url":legacyURL};
+        NSDictionary *universalAsset=@{@"name":universalName,@"state":@"uploaded",@"browser_download_url":universalURL};
+        NSMutableDictionary *withAssets=[release mutableCopy];
+        withAssets[@"assets"]=@[[NSNull null],universalAsset,legacyAsset];
+        NSDictionary *installers=[JMUpdateChecker releaseFromData:JSON(withAssets) error:NULL];
+        Check([[[JMUpdateChecker installerForRelease:installers darwinMajor:12] absoluteString] isEqual:legacyURL] &&
+            [[[JMUpdateChecker installerForRelease:installers darwinMajor:16] absoluteString] isEqual:legacyURL] &&
+            [[[JMUpdateChecker installerForRelease:installers darwinMajor:17] absoluteString] isEqual:universalURL] &&
+            [[[JMUpdateChecker installerForRelease:installers darwinMajor:24] absoluteString] isEqual:universalURL],
+            @"update picks the compatible uploaded DMG at both macOS boundaries");
+        withAssets[@"assets"]=@[legacyAsset,@{@"name":universalName,@"state":@"uploaded",@"browser_download_url":@"https://evil.invalid/update.dmg"}];
+        installers=[JMUpdateChecker releaseFromData:JSON(withAssets) error:NULL];
+        Check([[[JMUpdateChecker installerForRelease:installers darwinMajor:17] absoluteString] isEqual:legacyURL] &&
+            ![JMUpdateChecker installerForRelease:installers darwinMajor:18] && installers[@"url"],
+            @"High Sierra can use the legacy installer while newer systems fall back to the release page");
         NSMutableDictionary *bad=[release mutableCopy]; bad[@"html_url"]=@"https://evil.invalid/update";
         Check([JMUpdateChecker releaseFromData:[NSJSONSerialization dataWithJSONObject:bad options:0 error:NULL] error:NULL]==nil,@"update response cannot redirect users to unrelated download site");
         bad=[release mutableCopy]; bad[@"prerelease"]=@YES;
@@ -417,6 +437,7 @@ int main(void) {
         NSMutableDictionary *pinnedManifest=[manifest mutableCopy];
         NSMutableDictionary *pinnedPreferences=[manifest[@"preferences"] mutableCopy];
         pinnedPreferences[@"PinnedPeers"]=@[@"222",@"../../invalid",@"222"];
+        pinnedPreferences[@"ArchivedPeers"]=@[@"333",@"../../invalid",@"333"];
         pinnedManifest[@"preferences"]=pinnedPreferences;
         [large appendMessage:@{@"peer":@"222",@"id":@"backup-unread",@"text":@"Unread",@"timestamp":@20001,@"outgoing":@NO} unread:YES error:NULL];
         [large appendMessage:@{@"peer":@"222",@"id":@"backup-pending",@"text":@"Pending",@"timestamp":@20000,@"outgoing":@YES,@"delivery":@"pending"} error:NULL];
@@ -426,6 +447,7 @@ int main(void) {
         if (!manifestRead) fprintf(stderr,"Fixture backup manifest read failed: %s\n",backupReadError.localizedDescription.UTF8String);
         Check([manifestRead[@"drafts"][@"222"] isEqual:@"Набранный ответ"] && [manifestRead[@"preferences"][@"MutedPeers"] containsObject:@"333"],@"backup includes drafts and local notification settings");
         Check([manifestRead[@"preferences"][@"PinnedPeers"] isEqual:@[@"222"]],@"backup includes valid conversation pins and removes duplicate and invalid UINs");
+        Check([manifestRead[@"preferences"][@"ArchivedPeers"] isEqual:@[@"333"]],@"backup preserves the sanitized conversation archive");
         Check(!manifestRead[@"token"] && !manifestRead[@"preferences"][@"RememberedAccountUIN"] && !manifestRead[@"preferences"][@"password"],@"backup never includes credentials or automatic-login pointers");
         NSURL *targetRoot=[root URLByAppendingPathComponent:@"target"];
         JMHistory *restored=[[JMHistory alloc] initWithUIN:@"555" root:targetRoot];
