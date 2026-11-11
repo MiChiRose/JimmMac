@@ -33,11 +33,12 @@ in Russian, English, Ukrainian and Belarusian.
 | --- | --- |
 | [Universal DMG 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.dmg) | Intel on macOS 10.13 or later, Apple silicon on macOS 11 or later. |
 | [Universal ZIP 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.13plus-universal.zip) | The same application in a ZIP archive. |
-| [Legacy Intel DMG 0.16.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.16.0/JimmMac-0.16.0-macos10.8-10.13-x86_64.dmg) | For older Intel Macs targeting OS X 10.8–macOS 10.13. |
+| [Legacy Intel DMG 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.8-10.13-x86_64.dmg) | For Intel Macs with OS X 10.8–macOS 10.13. |
+| [Legacy Intel ZIP 0.17.0](https://github.com/MiChiRose/JimmMac/releases/download/v0.17.0/JimmMac-0.17.0-macos10.8-10.13-x86_64.zip) | The same build in a ZIP archive. |
 | [Release notes and SHA-256 checksums](https://github.com/MiChiRose/JimmMac/releases/tag/v0.17.0) | Changes and checksums for 0.17.0. |
 
 Open the DMG and drag JimmMac into Applications. Quit the running app before
-replacing it. Version 0.17.0 is a public testing build with an ad hoc signature.
+replacing it. The Universal build uses an ad hoc signature.
 If macOS blocks the first launch, allow the app in Privacy & Security.
 [Apple instructions](https://support.apple.com/en-us/102445).
 
@@ -74,7 +75,7 @@ after restarting the application.
 
 ## New in 0.17.0
 
-- Universal build for Intel and Apple silicon.
+- Two builds in one release. Legacy for Intel Macs with OS X 10.8–macOS 10.13 and Universal for Intel and Apple silicon.
 - Pin chats and jump to the next unread conversation with **⌘U**.
 - Jump to a conversation by name or UIN with **⌘K**.
 - Reconnection status in the chat window and manual resend with confirmation.
@@ -210,7 +211,7 @@ the full target range.
 | --- | --- |
 | 0.17.0 for Apple silicon | Launch and focused UI checks on **macOS 27.2**. Requires macOS 11 or later. |
 | 0.17.0 for Intel | Intel code launched under Rosetta on macOS 27.2. Requires macOS 10.13 or later. |
-| 0.16.0 for older Intel Macs | Installation, saved login, and sending and receiving messages verified on **OS X 10.9.5**. |
+| 0.17.0 for older Intel Macs | DMG, app tests and update checks verified on **OS X 10.9.5**. Requires OS X 10.8 or later. |
 
 Testing on physical Intel Macs with 10.13 or later is still pending.
 See [VALIDATION.md](../VALIDATION.md) for coverage and limitations.
