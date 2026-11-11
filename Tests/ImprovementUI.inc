@@ -286,7 +286,7 @@ static void RetroUpgradeUI(SmokeDelegate *delegate, NSString *output) {
 @end
 @implementation SmokeDelegate (RetryConfirmation)
 - (void)acceptRetryConfirmation:(NSTimer *)timer {
-    CheckUI(NSApp.modalWindow!=nil,"manual retry asks for confirmation");
+    CheckUI([NSApp modalWindow]!=nil,"manual retry asks for confirmation");
     [NSApp stopModalWithCode:NSAlertFirstButtonReturn];
 }
 @end
@@ -298,6 +298,8 @@ static void ConversationNavigationUI(SmokeDelegate *delegate, NSString *output) 
     NSTextView *transcript=[delegate valueForKey:@"transcript"];
     NSSegmentedControl *sections=[delegate valueForKey:@"sectionControl"];
     NSString *account=[delegate valueForKey:@"accountUIN"];
+    [delegate client:client changedStatus:@"Подключено" connected:YES];
+    [delegate markAllRead:nil];
     delegate.forcedReading=@NO;
     [delegate selectPeer:@"16001"];
     Draft(delegate,composer,@"До встречи!");

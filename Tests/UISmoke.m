@@ -1467,6 +1467,7 @@ int main(int argc, const char *argv[]) {
             CheckUI(![[delegate valueForKey:@"dataOperationInProgress"] boolValue] && composer.isEditable && !send.isEnabled,"restoration ends in usable offline draft mode");
             NSMenuItem *restoreCurrent=[[NSMenuItem alloc] initWithTitle:@"" action:@selector(changeAppearance:) keyEquivalent:@""]; restoreCurrent.representedObject=@"current"; [delegate changeAppearance:restoreCurrent];
 
+            NSMenu *primaryMenu=app.mainMenu;
             JMSetLanguage(@"en");
             CheckUI([JML(@"Ностальгия · ICQ для Mac 2011") isEqual:@"Nostalgia · ICQ for Mac 2011"],"English localization includes historical appearance names");
             [testAlertDefaults setObject:@"en" forKey:@"InterfaceLanguage"];
@@ -1501,6 +1502,7 @@ int main(int argc, const char *argv[]) {
                 [localized closePreferences:nil]; [login orderOut:nil];
             }
             JMSetLanguage(@"ru"); [testAlertDefaults setObject:@"ru" forKey:@"InterfaceLanguage"]; [app setDelegate:delegate];
+            [app setMainMenu:primaryMenu];
 
             ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); ConversationNavigationUI(delegate,output);
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
