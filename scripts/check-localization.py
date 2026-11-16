@@ -26,7 +26,8 @@ for language, table in [('EN', translations), ('UK', read_table('JMLocalizationU
     for ru, localized in table.items():
         if not localized.strip() or formats.findall(ru) != formats.findall(localized):
             errors.append(language + ' empty translation or format mismatch: ' + ru)
-for source in (root / 'Sources').glob('*.m'):
+sources = root / 'Sources'
+for source in list(sources.glob('*.m')) + [p for p in sources.glob('*.inc') if not p.name.startswith('JMLocalization')]:
     if source.name == 'JMLocalization.m':
         continue
     text = source.read_text()

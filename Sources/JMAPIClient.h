@@ -8,6 +8,7 @@
 - (void)client:(JMAPIClient *)client failedLogin:(NSError *)error;
 @optional
 - (void)client:(JMAPIClient *)client receivedOwnInfo:(NSDictionary *)info;
+- (void)client:(JMAPIClient *)client receivedAccountPreferences:(NSDictionary *)preferences;
 - (void)client:(JMAPIClient *)client receivedTyping:(NSDictionary *)typing;
 - (void)client:(JMAPIClient *)client authenticatedWithToken:(NSString *)token expiresAt:(NSDate *)expiration;
 @end
@@ -37,6 +38,12 @@
 - (void)uploadOwnAvatar:(NSData *)jpeg completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)setPresenceState:(NSString *)state completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)setTypingStatus:(NSString *)status forUIN:(NSString *)uin;
+- (void)searchDirectory:(NSString *)value field:(NSString *)field offset:(NSUInteger)offset completion:(void (^)(NSDictionary *, NSError *))completion;
+- (void)setMood:(NSString *)mood completion:(void (^)(NSDictionary *, NSError *))completion;
+- (void)fetchAccountPreferences:(void (^)(NSDictionary *, NSError *))completion;
+- (void)setDiscloseTyping:(BOOL)enabled completion:(void (^)(NSDictionary *, NSError *))completion;
+- (void)updatePrivacyMode:(NSString *)mode allow:(NSArray *)added remove:(NSArray *)removed completion:(void (^)(NSDictionary *, NSError *))completion;
+- (void)setGroup:(NSString *)group collapsed:(BOOL)collapsed completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)fetchPrivacy:(void (^)(NSDictionary *, NSError *))completion;
 - (void)setBlocked:(BOOL)blocked peer:(NSString *)peer enableDenyMode:(BOOL)enableMode completion:(void (^)(NSDictionary *, NSError *))completion;
 - (void)fetchStoredMessagesForPeer:(NSString *)peer completion:(void (^)(NSDictionary *, NSError *))completion;

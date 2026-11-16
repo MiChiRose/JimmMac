@@ -1,0 +1,1 @@
+/* JimmMac builds the portable decoder without optional SIMD or threads. */

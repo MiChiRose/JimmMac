@@ -473,3 +473,115 @@ static void ConversationNavigationUI(SmokeDelegate *delegate, NSString *output) 
     [chat makeKeyAndOrderFront:nil];
     delegate.forcedReading=@YES;
 }
+
+static const unsigned char fixtureWebP[]={82,73,70,70,30,0,0,0,87,69,66,80,86,80,56,76,17,0,0,0,47,31,192,3,0,7,80,153,90,150,162,255,129,136,232,127,0,0};
+static NSURLRequest *previewRequest;
+@interface PreviewFixture : NSURLProtocol
+@end
+@implementation PreviewFixture
++ (BOOL)canInitWithRequest:(NSURLRequest *)request { return [request.URL.host isEqual:@"jimm.online"] && [request.URL.path hasSuffix:@"/content"]; }
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
+- (void)startLoading {
+    previewRequest=self.request;
+    BOOL audio=[self.request.URL.path hasPrefix:@"/f/pffff"];
+    NSData *body=[NSData dataWithBytes:fixtureWebP length:sizeof(fixtureWebP)];
+    if (audio) {
+        // 250 ms of silence in a mono PCM WAV fixture.
+        const unsigned char wavHeader[]={82,73,70,70,196,15,0,0,87,65,86,69,102,109,116,32,16,0,0,0,
+                                         1,0,1,0,64,31,0,0,128,62,0,0,2,0,16,0,100,97,116,97,160,15,0,0};
+        NSMutableData *wav=[NSMutableData dataWithBytes:wavHeader length:sizeof(wavHeader)];
+        [wav increaseLengthBy:4000];
+        body=wav;
+    }
+    NSHTTPURLResponse *response=[[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{@"Content-Type":audio ? @"audio/wav" : @"image/webp"}];
+    [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+    [self.client URLProtocol:self didLoadData:body];
+    [self.client URLProtocolDidFinishLoading:self];
+}
+- (void)stopLoading {}
+@end
+
+static void DirectoryMediaUI(SmokeDelegate *delegate,NSString *output) {
+    UIClient *client=[delegate valueForKey:@"client"];
+    [delegate showDirectory:nil];
+    NSWindow *directory=[delegate valueForKey:@"directoryWindow"];
+    NSSearchField *query=[delegate valueForKey:@"directoryField"];
+    NSTableView *results=[delegate valueForKey:@"directoryTable"];
+    CheckUI(directory.isVisible,"directory search is reachable from a signed-in session");
+    CheckUtilityBounds(directory);
+    query.stringValue=@"Пользователь";
+    [delegate searchDirectory:nil];
+    CheckUI(results.numberOfRows==1 && results.selectedRow==0,"a directory result has a selected person");
+    Capture(directory,[output stringByAppendingPathComponent:@"UI-directory-search.png"]);
+    [delegate writeDirectoryContact:nil];
+    CheckUI(!directory.isVisible && [[delegate valueForKey:@"selectedPeer"] isEqual:@"666777"],"opening a directory result starts the intended conversation");
+
+    [delegate showProfile:nil];
+    PumpUI(0.05);
+    [delegate client:client receivedPresence:@{@"aimId":@"666777",@"state":@"online",@"moodIcon":@"https://jimm.online/webapi/mood?id=000a306963716d6f6f643231"}];
+    NSImageView *mood=[delegate valueForKey:@"profileMood"];
+    CheckUI(mood.image && !mood.isHidden && [mood.toolTip isEqual:JML(@"Работаю")],"profile uses the original mood sprite for a server X-status");
+    [delegate client:client receivedPresence:@{@"aimId":@"666777",@"state":@"online"}];
+    CheckUI(!mood.image && mood.isHidden,"a full presence update without a mood clears the old icon");
+    [delegate closeProfile:nil];
+
+    NSTextView *composer=[delegate valueForKey:@"composer"];
+    [delegate client:client receivedAccountPreferences:@{@"discloseTyping":@NO}];
+    client.lastTyping=nil;
+    Draft(delegate,composer,@"Private draft");
+    CheckUI(!client.lastTyping,"a server typing opt-out keeps the composer silent");
+    [delegate client:client receivedAccountPreferences:@{@"discloseTyping":@YES}];
+    Draft(delegate,composer,@"Public draft");
+    CheckUI([client.lastTyping isEqual:@"typing"],"reenabling the account preference resumes typing announcements");
+    Draft(delegate,composer,@"");
+
+    [delegate client:client receivedBuddyList:@{@"groups":@[@{@"name":@"Sync Fixture",@"collapsed":@YES,@"buddies":@[]}]}];
+    NSString *account=[delegate valueForKey:@"accountUIN"];
+    NSString *groupKey=[NSString stringWithFormat:@"CollapsedGroups.%@.%@",account,JMThemeIdentifier()];
+    CheckUI([[testAlertDefaults arrayForKey:groupKey] containsObject:@"Sync Fixture"],"a server-provided collapse flag synchronizes to the active theme");
+    [[delegate valueForKey:@"sectionControl"] setSelectedSegment:0];
+    [delegate changeSection:nil];
+    [delegate toggleGroup:@"Sync Fixture"];
+    CheckUI([client.rosterCalls.lastObject isEqual:@"expandGroup"] && ![[testAlertDefaults arrayForKey:groupKey] containsObject:@"Sync Fixture"],
+        "expanding a named group updates the server and the local theme");
+    [[delegate valueForKey:@"sectionControl"] setSelectedSegment:1];
+    [delegate changeSection:nil];
+
+    NSString *attachment=@"https://jimm.online/f/p0123456789abcdef0123456789abcdef";
+    [delegate client:client receivedMessage:Incoming(@"media-fixture",@"666777",attachment)];
+    NSTextView *transcript=[delegate valueForKey:@"transcript"];
+    NSRange action=[transcript.string rangeOfString:JML(@"Открыть вложение в чате")];
+    CheckUI(action.location!=NSNotFound && !previewRequest,"an attachment gets a click-to-load control with no background download");
+    JMHTTPClient *network=[[JMHTTPClient alloc] initWithProtocolClasses:@[[PreviewFixture class]] legacy:NO];
+    [delegate setValue:network forKey:@"attachmentNetwork"];
+    id link=[transcript.textStorage attribute:NSLinkAttributeName atIndex:action.location effectiveRange:NULL];
+    [delegate textView:transcript clickedOnLink:link atIndex:action.location];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+    while (![delegate valueForKey:@"attachmentImage"] && deadline.timeIntervalSinceNow>0) PumpUI(0.02);
+    CheckUI([delegate valueForKey:@"attachmentImage"] && [previewRequest.URL.absoluteString isEqual:[attachment stringByAppendingString:@"/content"]] && !previewRequest.HTTPShouldHandleCookies,
+        "WebP downloads from the content route without cookies and decodes on this OS");
+    CheckUI([transcript.string rangeOfString:attachment].location!=NSNotFound && [transcript.string rangeOfString:[NSString stringWithFormat:@"%C",(unichar)0xfffc]].location!=NSNotFound,
+        "inline WebP image keeps the original browser link in the transcript");
+    NSString *audio=@"https://jimm.online/f/pfffffffffffffffffffffffffffffff0";
+    [delegate client:client receivedMessage:Incoming(@"audio-fixture",@"666777",audio)];
+    action=[transcript.string rangeOfString:JML(@"Открыть вложение в чате")];
+    CheckUI(action.location!=NSNotFound,"voice attachments get the same opt-in preview action");
+    link=[transcript.textStorage attribute:NSLinkAttributeName atIndex:action.location effectiveRange:NULL];
+    [delegate textView:transcript clickedOnLink:link atIndex:action.location];
+    deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+    while ([delegate valueForKey:@"attachmentTask"] && deadline.timeIntervalSinceNow>0) PumpUI(0.02);
+    NSSound *sound=[delegate valueForKey:@"attachmentSound"];
+    CheckUI(sound.duration>0 && [transcript.string rangeOfString:JML(@"Воспроизвести или остановить")].location!=NSNotFound,
+        "a supported voice clip plays through the in-chat audio action");
+    [network invalidateAndCancel];
+    [delegate setValue:nil forKey:@"attachmentNetwork"];
+    previewRequest=nil;
+    [delegate selectPeer:@"16001"];
+    CheckUI(![delegate valueForKey:@"attachmentImage"] && ![delegate valueForKey:@"attachmentSound"],"leaving the chat discards temporary previews and audio");
+
+    NSData *webp=[NSData dataWithBytes:fixtureWebP length:sizeof(fixtureWebP)];
+    CGImageRef image=JMCreateWebPPreview(webp,8);
+    CheckUI(image && CGImageGetWidth(image)==8 && CGImageGetHeight(image)==4,"the portable WebP decoder scales the original dimensions proportionally");
+    if (image) CGImageRelease(image);
+    CheckUI(!JMCreateWebPPreview([webp subdataWithRange:NSMakeRange(0,12)],8),"the portable decoder rejects a truncated image");
+}

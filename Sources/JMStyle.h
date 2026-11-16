@@ -24,6 +24,7 @@ NSColor *JMLegacyHeaderBottomColor(void);
 @property(nonatomic) BOOL groupOnly;
 - (CGFloat)groupHeaderHeight;
 - (void)configureName:(NSString *)name detail:(NSString *)detail state:(NSString *)state unread:(NSInteger)unread;
+- (void)setMoodImage:(NSImage *)image title:(NSString *)title;
 - (void)setAvatar:(NSImage *)image;
 - (void)setTimestamp:(NSString *)timestamp draft:(BOOL)draft;
 - (void)setTimestampTooltip:(NSString *)tooltip;

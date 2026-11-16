@@ -25,6 +25,11 @@
 #import "JMDiagnostics.h"
 #import "JMAutoAway.h"
 #import <ApplicationServices/ApplicationServices.h>
+#import "JMHTTPClient.h"
+#import <ImageIO/ImageIO.h>
+#import "JMWebP.h"
+
+#include "JMMoods.inc"
 
 @interface JMWindowView : NSView
 @end
@@ -135,6 +140,28 @@ static NSString *JMState(NSDictionary *contact) {
 @property(nonatomic,strong) NSURL *updateReleaseURL;
 @property(nonatomic) BOOL showingArchive;
 @property(nonatomic,strong) NSMutableSet *archivedPeers;
+@property(nonatomic,strong) JMPanel *directoryWindow;
+@property(nonatomic,strong) NSSearchField *directoryField;
+@property(nonatomic,strong) NSPopUpButton *directoryKind;
+@property(nonatomic,strong) NSButton *directoryNext;
+@property(nonatomic,strong) NSTextField *directoryStatus;
+@property(nonatomic,strong) NSTableView *directoryTable;
+@property(nonatomic,copy) NSArray *directoryResults;
+@property(nonatomic,copy) NSString *directoryQuery;
+@property(nonatomic,copy) NSString *directoryQueryField;
+@property(nonatomic) NSUInteger directorySerial;
+@property(nonatomic) NSUInteger directoryOffset;
+@property(nonatomic,strong) NSImageView *profileMood;
+@property(nonatomic) BOOL changingMood;
+@property(nonatomic,strong) NSNumber *typingDisclosure;
+@property(nonatomic,strong) NSMutableSet *syncingGroups;
+@property(nonatomic,strong) JMHTTPClient *attachmentNetwork;
+@property(nonatomic,strong) JMHTTPTask *attachmentTask;
+@property(nonatomic,strong) NSURL *attachmentURL;
+@property(nonatomic,strong) NSImage *attachmentImage;
+@property(nonatomic,strong) NSSound *attachmentSound;
+@property(nonatomic,copy) NSString *attachmentFailure;
+@property(nonatomic) NSUInteger attachmentSerial;
 @property(nonatomic,strong) JMPanel *scheduledBackupWindow;
 @property(nonatomic,strong) NSPopUpButton *scheduledBackupInterval;
 @property(nonatomic,strong) NSTextField *scheduledBackupFolder;
@@ -330,6 +357,10 @@ static NSString *JMState(NSDictionary *contact) {
 @end
 
 @implementation JMAppDelegate
+#include "JMDirectoryUI.inc"
+#include "JMMoodUI.inc"
+#include "JMAttachmentUI.inc"
+#include "JMPrivacyUI.inc"
 - (void)updateHistoricalTabs {
     if (!self.themeConversationTabs || JMTheme()!=JMThemeMac2011) return;
     NSMutableSet *active=[self.conversationPeers mutableCopy];
@@ -388,10 +419,33 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)toggleGroup:(NSString *)group {
     if (!group.length || self.sectionControl.selectedSegment!=0 || self.searchField.stringValue.length) return;
+    if ([self.syncingGroups containsObject:group]) return;
     NSString *key=[self collapsedGroupsKey];
     NSMutableSet *collapsed=[NSMutableSet setWithArray:[self.loginDefaults arrayForKey:key] ?: @[]];
     if ([collapsed containsObject:group]) [collapsed removeObject:group]; else [collapsed addObject:group];
     [self.loginDefaults setObject:collapsed.allObjects forKey:key]; [self reloadContacts];
+    if (!self.client.connected || ![self.serverGroups containsObject:group]) return;
+    BOOL value=[collapsed containsObject:group];
+    NSUInteger session=self.loginAttemptSerial;
+    [self.syncingGroups addObject:group];
+    __weak JMAppDelegate *weakSelf=self;
+    [self.client setGroup:group collapsed:value completion:^(NSDictionary *data,NSError *error) {
+        JMAppDelegate *self=weakSelf;
+        if (!self || self.loginAttemptSerial!=session) return;
+        [self.syncingGroups removeObject:group];
+        if (error) { JMSetLabel(self.contactNotice,error.localizedDescription); return; }
+        [self syncGroup:group collapsed:value];
+        [self reloadContacts];
+    }];
+}
+- (void)syncGroup:(NSString *)group collapsed:(BOOL)collapsed {
+    if (!self.accountUIN.length) return;
+    for (NSString *theme in JMThemeIdentifiers()) {
+        NSString *key=[NSString stringWithFormat:@"CollapsedGroups.%@.%@",self.accountUIN,theme];
+        NSMutableSet *groups=[NSMutableSet setWithArray:[self.loginDefaults arrayForKey:key] ?: @[]];
+        if (collapsed) [groups addObject:group]; else [groups removeObject:group];
+        [self.loginDefaults setObject:groups.allObjects forKey:key];
+    }
 }
 - (void)toggleSelectedGroup:(id)sender {
     NSInteger row=self.contactTable.selectedRow;
@@ -1134,7 +1188,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.draftSaveQueue=dispatch_queue_create("online.jimm.drafts",DISPATCH_QUEUE_SERIAL);
     self.contacts = [NSMutableDictionary dictionary]; self.drafts = [NSMutableDictionary dictionary]; self.unread = [NSMutableDictionary dictionary];
     self.serverContactIDs = [NSMutableSet set]; self.conversationPeers = [NSMutableSet set];
-    self.serverGroups=[NSMutableArray array]; self.favoritePeers=[NSMutableSet set]; self.pinnedPeers=[NSMutableSet set]; self.archivedPeers=[NSMutableSet set]; self.mutedPeers=[NSMutableSet set]; self.transcriptTail=YES;
+    self.serverGroups=[NSMutableArray array]; self.syncingGroups=[NSMutableSet set]; self.favoritePeers=[NSMutableSet set]; self.pinnedPeers=[NSMutableSet set]; self.archivedPeers=[NSMutableSet set]; self.mutedPeers=[NSMutableSet set]; self.transcriptTail=YES;
     self.ownInfo=[NSMutableDictionary dictionary]; self.profileDates=[NSMutableDictionary dictionary]; self.profileTexts=[NSMutableDictionary dictionary]; self.incomingTyping=[NSMutableDictionary dictionary];
     if (JMFlowerImage()) [NSApp setApplicationIconImage:JMFlowerImage()];
     [self createMenu]; [self createLoginWindow]; [self createChatWindow];
@@ -1230,6 +1284,8 @@ static NSString *JMState(NSDictionary *contact) {
     viewItem.submenu=viewMenu; [bar addItem:viewItem];
     NSMenuItem *contactsItem=[[NSMenuItem alloc] initWithTitle:JML(@"Контакты") action:NULL keyEquivalent:@""];
     NSMenu *contactsMenu=[[NSMenu alloc] initWithTitle:JML(@"Контакты")];
+    [contactsMenu addItemWithTitle:JML(@"Найти человека…") action:@selector(showDirectory:) keyEquivalent:@""].target=self;
+    [contactsMenu addItemWithTitle:JML(@"X-статус…") action:@selector(showMoodPicker:) keyEquivalent:@""].target=self;
     for (NSDictionary *entry in @[@{@"title":JML(@"Добавить по UIN…"),@"action":@"addContact:"},@{@"title":JML(@"Переименовать контакт…"),@"action":@"renameContact:"},@{@"title":JML(@"Переместить в группу…"),@"action":@"moveContact:"},@{@"title":JML(@"Удалить из контактов…"),@"action":@"removeContact:"}]) {
         NSMenuItem *item=[contactsMenu addItemWithTitle:entry[@"title"] action:NSSelectorFromString(entry[@"action"]) keyEquivalent:@""]; item.target=self;
     }
@@ -1240,6 +1296,7 @@ static NSString *JMState(NSDictionary *contact) {
     NSMenuItem *mute=[contactsMenu addItemWithTitle:JML(@"Отключить уведомления") action:@selector(toggleMuteConversation:) keyEquivalent:@""]; mute.target=self;
     [contactsMenu addItem:[NSMenuItem separatorItem]];
     NSMenuItem *block=[contactsMenu addItemWithTitle:JML(@"Блокировка контакта…") action:@selector(toggleContactBlock:) keyEquivalent:@""]; block.target=self;
+    [contactsMenu addItemWithTitle:JML(@"Настройки приватности…") action:@selector(showAccountPrivacy:) keyEquivalent:@""].target=self;
     NSMenuItem *blocked=[contactsMenu addItemWithTitle:JML(@"Список блокировки…") action:@selector(showBlockedContacts:) keyEquivalent:@""]; blocked.target=self;
     NSMenuItem *groups=[contactsMenu addItemWithTitle:JML(@"Управление группами…") action:@selector(showGroups:) keyEquivalent:@""]; groups.target=self;
     [contactsItem setSubmenu:contactsMenu]; [bar addItem:contactsItem];
@@ -1478,6 +1535,7 @@ static NSString *JMState(NSDictionary *contact) {
     else [self selectPeer:contact[@"aimId"]];
 }
 - (void)handleEscapeInWindow:(NSWindow *)window {
+    if (window==self.directoryWindow) { [self closeDirectory:nil]; return; }
     if (window==self.quickChatWindow) { [self closeQuickChat:nil]; return; }
     if (window==self.rosterWindow) {
         if (self.searchField.stringValue.length) { self.searchField.stringValue=@""; [self reloadContacts]; }
@@ -1709,7 +1767,7 @@ static NSString *JMState(NSDictionary *contact) {
     [chat addSubview:self.mobileChatTitle];
     self.themeMainMenu=[[JMThemedPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:YES]; self.themeMainMenu.font=[NSFont systemFontOfSize:11]; self.themeMainMenu.toolTip=JML(@"Профиль, настройки и сведения о JimmMac"); [root addSubview:self.themeMainMenu];
     [self.themeMainMenu addItemWithTitle:JML(@"Меню")];
-    for (NSDictionary *item in @[@{@"title":JML(@"Мой профиль…"),@"action":@"showOwnProfile:"},@{@"title":JML(@"Настройки…"),@"action":@"showPreferences:"},@{@"title":JML(@"О JimmMac"),@"action":@"about:"},@{@"title":JML(@"Добавить контакт…"),@"action":@"addContact:"},@{@"title":JML(@"Написать по UIN…"),@"action":@"openConversation:"},@{@"title":JML(@"Список блокировки…"),@"action":@"showBlockedContacts:"},@{@"title":JML(@"Выйти из аккаунта"),@"action":@"logout:"}]) { [self.themeMainMenu addItemWithTitle:item[@"title"]]; self.themeMainMenu.lastItem.target=self; self.themeMainMenu.lastItem.action=NSSelectorFromString(item[@"action"]); }
+    for (NSDictionary *item in @[@{@"title":JML(@"Мой профиль…"),@"action":@"showOwnProfile:"},@{@"title":JML(@"Настройки…"),@"action":@"showPreferences:"},@{@"title":JML(@"О JimmMac"),@"action":@"about:"},@{@"title":JML(@"Найти человека…"),@"action":@"showDirectory:"},@{@"title":JML(@"X-статус…"),@"action":@"showMoodPicker:"},@{@"title":JML(@"Добавить контакт…"),@"action":@"addContact:"},@{@"title":JML(@"Написать по UIN…"),@"action":@"openConversation:"},@{@"title":JML(@"Список блокировки…"),@"action":@"showBlockedContacts:"},@{@"title":JML(@"Настройки приватности…"),@"action":@"showAccountPrivacy:"},@{@"title":JML(@"Выйти из аккаунта"),@"action":@"logout:"}]) { [self.themeMainMenu addItemWithTitle:item[@"title"]]; self.themeMainMenu.lastItem.target=self; self.themeMainMenu.lastItem.action=NSSelectorFromString(item[@"action"]); }
     NSMenuItem *groups=[self.themeMainMenu.menu addItemWithTitle:JML(@"Группы контактов") action:NULL keyEquivalent:@""]; self.themeGroupMenu=[[NSMenu alloc] initWithTitle:JML(@"Группы контактов")]; groups.submenu=self.themeGroupMenu;
     // Include every control in the loop. AppKit skips hidden/disabled controls
     // and follows the user's Full Keyboard Access preference for buttons.
@@ -2357,6 +2415,11 @@ static NSString *JMState(NSDictionary *contact) {
         [self confirmRetryMessage:message];
         return YES;
     }
+    if ([link isEqual:[NSURL URLWithString:@"jimmmac-action:attachment"]] && charIndex<textView.textStorage.length &&
+        [[textView.textStorage attribute:NSLinkAttributeName atIndex:charIndex effectiveRange:NULL] isEqual:link]) {
+        [self loadAttachment:[textView.textStorage attribute:@"JMAttachmentURL" atIndex:charIndex effectiveRange:NULL]];
+        return YES;
+    }
     NSURL *url=JMExternalURL(link); if (url) [self openExternalURL:url];
     return YES;
 }
@@ -2505,6 +2568,8 @@ static NSString *JMState(NSDictionary *contact) {
         item.title=[self.archivedPeers containsObject:peer] ? JML(@"Вернуть из архива") : JML(@"Убрать в архив");
         return [self canNavigateConversations] && [self.conversationPeers containsObject:peer];
     }
+    if (item.action==@selector(showMoodPicker:)) return self.client.connected && !self.changingMood;
+    if (item.action==@selector(showDirectory:)) return self.client.connected && [self canNavigateConversations];
     if (item.action==@selector(showQuickChat:)) return [self canNavigateConversations];
     if (item.action==@selector(togglePinConversation:)) {
         NSString *peer=[self contactForAction:item];
@@ -2517,6 +2582,7 @@ static NSString *JMState(NSDictionary *contact) {
         NSString *peer=[self contactForAction:item];
         return self.client.connected && !self.changingPrivacy && JMValidUIN(peer) && ![peer isEqual:self.accountUIN];
     }
+    if (item.action==@selector(showAccountPrivacy:)) return self.client.connected && !self.changingPrivacy;
     if (item.action==@selector(showBlockedContacts:)) return self.client.connected && !self.changingPrivacy;
     if (item.action==@selector(restoreRecentMessages:)) return self.client.connected && self.history && !self.restoringMessages && JMValidUIN(self.selectedPeer);
     if (item.action==@selector(showStorage:) || item.action==@selector(showHistoryDay:) || item.action==@selector(showBookmarks:)) return self.history && !self.dataOperationInProgress;
@@ -2556,6 +2622,11 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (BOOL)prepareLoginUIForUIN:(NSString *)uin {
     [self closeQuickChat:nil];
+    [self closeDirectory:nil];
+    self.changingMood=NO;
+    self.typingDisclosure=nil;
+    [self.syncingGroups removeAllObjects];
+    [self discardAttachmentPreviews];
     [self closeScheduledBackup:nil];
     self.scheduledBackupRetry=nil; self.scheduledBackupError=nil;
     self.loginAttemptSerial++; self.connectionStatus=nil; self.unreadOnly=NO; self.showingArchive=NO; self.changingPrivacy=NO; self.restoringMessages=NO; self.restoreAfterReconnect=NO;
@@ -2682,6 +2753,11 @@ static NSString *JMState(NSDictionary *contact) {
     [self.client disconnect]; self.sending = NO; self.sendNotBefore = nil;
     self.accountUIN = nil; self.addingContact = NO; [self.serverContactIDs removeAllObjects]; [self.conversationPeers removeAllObjects];
     [self closeQuickChat:nil];
+    [self closeDirectory:nil];
+    self.changingMood=NO;
+    self.typingDisclosure=nil;
+    [self.syncingGroups removeAllObjects];
+    [self discardAttachmentPreviews];
     [self closeScheduledBackup:nil];
     self.scheduledBackupRetry=nil; self.scheduledBackupError=nil;
     self.history = nil; self.offlineMode=NO; self.selectedPeer = nil; [self.mutedPeers removeAllObjects]; [self.favoritePeers removeAllObjects]; [self.pinnedPeers removeAllObjects]; [self.archivedPeers removeAllObjects]; self.showingArchive=NO; self.onlineOnlyCheckbox.state=NSOffState; self.favoritesOnlyCheckbox.state=NSOffState; self.sendingLocalID=nil;
@@ -2712,6 +2788,14 @@ static NSString *JMState(NSDictionary *contact) {
     [self updateSendButton]; [self updateTypingIndicator];
     if (connectionChanged && self.selectedPeer.length) [self renderTranscript];
     if (restore) { self.restoreAfterReconnect=NO; [self restoreRecentMessages:nil]; }
+    if (connected && connectionChanged) {
+        NSUInteger session=self.loginAttemptSerial;
+        __weak JMAppDelegate *weakSelf=self;
+        [client fetchAccountPreferences:^(NSDictionary *preferences,NSError *error) {
+            JMAppDelegate *self=weakSelf;
+            if (self && session==self.loginAttemptSerial && !error) [self updateTypingDisclosure:preferences];
+        }];
+    }
     if (connected) { [self openPendingNotification]; [self presentPendingUpdateIfPossible]; }
 }
 - (void)updateAccountLabel {
@@ -2728,6 +2812,11 @@ static NSString *JMState(NSDictionary *contact) {
     self.notificationAlerts.accountUIN=nil;
     [self stopOutgoingTyping]; [self.profileWindow orderOut:nil];
     [self closeQuickChat:nil];
+    [self closeDirectory:nil];
+    self.changingMood=NO;
+    self.typingDisclosure=nil;
+    [self.syncingGroups removeAllObjects];
+    [self discardAttachmentPreviews];
     [self closeScheduledBackup:nil];
     [self.chatWindow orderOut:nil]; [self.rosterWindow orderOut:nil]; [self resetLogin:[error localizedDescription]];
 }
@@ -2735,7 +2824,14 @@ static NSString *JMState(NSDictionary *contact) {
     NSMutableDictionary *newContacts = [NSMutableDictionary dictionary];
     [self.serverContactIDs removeAllObjects];
     [self.serverGroups removeAllObjects];
-    for (id value in JMArray(buddyList[@"groups"])) { NSString *name=JMString(JMDictionary(value)[@"name"]); if (name.length && ![self.serverGroups containsObject:name]) [self.serverGroups addObject:name]; }
+    for (id value in JMArray(buddyList[@"groups"])) {
+        NSDictionary *entry=JMDictionary(value);
+        NSString *name=JMString(entry[@"name"]);
+        if (!name.length || [self.serverGroups containsObject:name]) continue;
+        [self.serverGroups addObject:name];
+        if ([entry[@"collapsed"] isKindOfClass:[NSNumber class]] && ![self.syncingGroups containsObject:name])
+            [self syncGroup:name collapsed:[entry[@"collapsed"] boolValue]];
+    }
     for (NSDictionary *buddy in JMContactsFromBuddyList(buddyList)) {
         newContacts[buddy[@"aimId"]] = [buddy mutableCopy]; [self.serverContactIDs addObject:buddy[@"aimId"]];
         if (JMString(buddy[@"friendly"]).length) newContacts[buddy[@"aimId"]][@"_rosterFriendly"]=buddy[@"friendly"];
@@ -2750,11 +2846,12 @@ static NSString *JMState(NSDictionary *contact) {
     NSMutableDictionary *contact = self.contacts[peer]; if (!contact) return;
     NSString *oldState=JMString(contact[@"state"]);
     BOOL changedAvatar=presence[@"buddyIcon"] && ![presence[@"buddyIcon"] isEqual:contact[@"buddyIcon"]];
+    if (JMString(presence[@"state"]).length) [contact removeObjectForKey:@"moodIcon"];
     for (NSString *key in presence) {
         if ([key isEqualToString:@"state"] && ![JMString(presence[key]) length]) continue;
         if (presence[key] != [NSNull null]) contact[key] = presence[key];
     }
-    [self reloadContacts]; [self updatePeerLabel];
+    [self reloadContacts]; [self updatePeerLabel]; [self updateProfileCard];
     NSString *newState=JMString(contact[@"state"]);
     if (oldState.length && newState.length && ![oldState isEqualToString:newState] && [self.serverContactIDs containsObject:peer] && client.connected && ![self.mutedPeers containsObject:peer] && self.connectedSince && -[self.connectedSince timeIntervalSinceNow]>3) {
         BOOL wasOnline=![oldState isEqualToString:@"offline"], isOnline=![newState isEqualToString:@"offline"];
@@ -3085,12 +3182,17 @@ static NSString *JMState(NSDictionary *contact) {
     [self layoutChatWindow]; [self reloadContacts];
 }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
+    if (tableView==self.directoryTable) return self.directoryResults.count;
     if (tableView==self.quickChatTable) return self.quickChatResults.count;
     return tableView==self.historyTable ? self.historyResults.count : self.visibleContacts.count;
 }
 - (NSTableRowView *)tableView:(NSTableView *)tableView rowViewForRow:(NSInteger)row { return [[JMContactRowView alloc] initWithFrame:NSZeroRect]; }
 - (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row {
     if (tableView==self.quickChatTable) return JMName(self.quickChatResults[(NSUInteger)row][@"contact"]);
+    if (tableView==self.directoryTable) {
+        NSDictionary *person=self.directoryResults[(NSUInteger)row];
+        return [tableColumn.identifier isEqual:@"uin"] ? JMString(person[@"aimId"]) : [self directoryPersonName:person];
+    }
     if (tableView==self.historyTable) return JMString(self.historyResults[(NSUInteger)row][@"text"]);
     NSDictionary *contact = self.visibleContacts[(NSUInteger)row]; NSString *peer = contact[@"aimId"];
     if (contact[@"_collapsedGroup"]) return [self historicalHeaderForRow:row];
@@ -3154,6 +3256,9 @@ static NSString *JMState(NSDictionary *contact) {
         if (last) [cell setTimestampTooltip:[NSDateFormatter localizedStringFromDate:[NSDate dateWithTimeIntervalSince1970:[last[@"timestamp"] doubleValue]] dateStyle:NSDateFormatterMediumStyle timeStyle:NSDateFormatterShortStyle]];
     }
     [cell setToolTip:[NSString stringWithFormat:@"%@\nUIN %@ · %@%@",JMName(contact),peer,JMState(contact),[self.sectionControl selectedSegment]==1 ? [@"\n" stringByAppendingString:detail] : @""]];
+    NSString *mood=JMMoodCode(contact[@"moodIcon"]);
+    NSImage *moodImage=JMMoodImage(mood);
+    [cell setMoodImage:moodImage title:moodImage ? JMMoodTitle(mood) : nil];
     [cell setAvatar:JMTheme()==JMThemePro2003 ? nil : [self.avatars imageForUIN:peer]];
     return cell;
 }
@@ -3181,7 +3286,7 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)selectPeer:(NSString *)peer {
     if (self.dataOperationInProgress || !JMValidUIN(peer)) return;
     self.highlightedMessageID=nil; self.historyHighlightQuery=nil;
-    if (self.selectedPeer && ![self.selectedPeer isEqualToString:peer]) [self stopOutgoingTyping];
+    if (self.selectedPeer && ![self.selectedPeer isEqualToString:peer]) { [self stopOutgoingTyping]; [self discardAttachmentPreviews]; }
     if (self.selectedPeer) [self rememberDraftForPeer:self.selectedPeer text:self.composer.string];
     BOOL changed=![self.selectedPeer isEqualToString:peer];
     self.selectedPeer = peer; [self updateDockBadge];
@@ -3267,7 +3372,11 @@ static NSString *JMState(NSDictionary *contact) {
         NSString *plain=JMString(message[@"text"]);
 
         NSMutableAttributedString *body=[[NSMutableAttributedString alloc] initWithString:[plain stringByAppendingString:@"\n\n"] attributes:@{NSFontAttributeName:JMThemeFont(self.chatPreferences.messageFont,self.chatPreferences.family),NSForegroundColorAttributeName:[NSColor textColor],NSParagraphStyleAttributeName:bodyStyle}];
-        for (NSTextCheckingResult *link in JMLinksInText(plain)) [body addAttributes:@{NSLinkAttributeName:link.URL,NSToolTipAttributeName:link.URL.absoluteString} range:link.range];
+        NSURL *attachmentURL=nil;
+        for (NSTextCheckingResult *link in JMLinksInText(plain)) {
+            [body addAttributes:@{NSLinkAttributeName:link.URL,NSToolTipAttributeName:link.URL.absoluteString} range:link.range];
+            if (!attachmentURL && JMJimmAttachmentURL(link.URL)) attachmentURL=link.URL;
+        }
         if ([JMString(message[@"id"]) isEqualToString:self.highlightedMessageID] && self.historyHighlightQuery.length) {
             NSRange remaining=NSMakeRange(0,plain.length);
             while (remaining.length) {
@@ -3279,6 +3388,11 @@ static NSString *JMState(NSDictionary *contact) {
         }
         if (self.chatPreferences.emoticonsEnabled) JMApplyEmoticons(body);
         if (JMString(message[@"id"]).length) self.transcriptRanges[message[@"id"]]=[NSValue valueWithRange:NSMakeRange(text.length,body.length>=2 ? body.length-2 : 0)];
+        if (attachmentURL) {
+            [body deleteCharactersInRange:NSMakeRange(body.length-1,1)];
+            [self appendAttachment:attachmentURL toMessage:body];
+            [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n\n"]];
+        }
         [text appendAttributedString:body];
         if (JMString(message[@"id"]).length) [text addAttribute:@"JMMessageID" value:message[@"id"] range:NSMakeRange(messageStart,text.length-messageStart-2)];
     }
@@ -3304,11 +3418,11 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)textDidChange:(NSNotification *)notification {
     if ([notification object] == self.composer) {
         if (self.selectedPeer) [self rememberDraftForPeer:self.selectedPeer text:self.composer.string]; [self updateSendButton];
-        [self.outgoingTypingTimer invalidate];
-        if ([[self.composer string] length] && self.selectedPeer) {
+        if ([[self.composer string] length] && self.selectedPeer && self.typingDisclosure.boolValue) {
+            [self.outgoingTypingTimer invalidate];
             [self.client setTypingStatus:@"typing" forUIN:self.selectedPeer];
             self.outgoingTypingTimer=[NSTimer scheduledTimerWithTimeInterval:3 target:self selector:@selector(typingIdle:) userInfo:nil repeats:NO];
-        } else [self stopOutgoingTyping];
+        } else if (self.typingDisclosure.boolValue) [self stopOutgoingTyping];
     }
 }
 - (void)updateSendButton {
@@ -3583,6 +3697,7 @@ static NSString *JMState(NSDictionary *contact) {
     self.profileAvatar=[[NSImageView alloc] initWithFrame:NSMakeRect(24,306,64,64)]; [self.profileAvatar setImageScaling:NSImageScaleProportionallyUpOrDown]; [root addSubview:self.profileAvatar];
     self.profileName=JMLabel(@"",NSMakeRect(104,340,300,27),18,YES); [self.profileName setSelectable:YES]; [root addSubview:self.profileName];
     self.profileDetail=JMLabel(@"",NSMakeRect(105,308,300,25),12,NO); [self.profileDetail setSelectable:YES]; [root addSubview:self.profileDetail];
+    self.profileMood=[[NSImageView alloc] initWithFrame:NSMakeRect(24,260,16,16)]; [root addSubview:self.profileMood];
     self.profileStatus=JMLabel(@"",NSMakeRect(24,246,380,46),12,NO); [[self.profileStatus cell] setWraps:YES]; [self.profileStatus setTextColor:JMSecondaryTextColor()]; [root addSubview:self.profileStatus];
     [root addSubview:JMLabel(JML(@"О себе"),NSMakeRect(24,216,380,21),12,YES)];
     NSScrollView *scroll=[[NSScrollView alloc] initWithFrame:NSMakeRect(24,65,382,147)]; [scroll setHasVerticalScroller:YES]; [scroll setBorderType:NSBezelBorder];
@@ -3602,7 +3717,13 @@ static NSString *JMState(NSDictionary *contact) {
     [self.profileName setStringValue:JMName(person)];
     [self.profileName setToolTip:self.profileName.stringValue];
     [self.profileDetail setStringValue:[NSString stringWithFormat:@"UIN %@ · %@",self.profilePeer,JMState(person)]];
-    NSString *status=JMString(person[@"statusMsg"]); [self.profileStatus setStringValue:status.length ? status : JML(@"Статус без подписи")];
+    NSString *mood=JMMoodCode(person[@"moodIcon"]);
+    self.profileMood.image=JMMoodImage(mood);
+    self.profileMood.hidden=!self.profileMood.image;
+    self.profileMood.toolTip=self.profileMood.image ? JMMoodTitle(mood) : nil;
+    self.profileStatus.frame=self.profileMood.isHidden ? NSMakeRect(24,246,380,46) : NSMakeRect(46,246,358,46);
+    NSString *status=JMString(person[@"statusMsg"]);
+    JMSetLabel(self.profileStatus,status.length ? status : (mood.length ? JMMoodTitle(mood) : JML(@"Статус без подписи")));
     [self.profileStatus setToolTip:self.profileStatus.stringValue]; [self.profileDetail setToolTip:self.profileDetail.stringValue];
     [self.profileAvatar setImage:[self.avatars imageForUIN:self.profilePeer] ?: (JMTheme()==JMThemeMac2011 ? JMRetroImage(@"avatar") : nil) ?: [NSImage imageNamed:NSImageNameUser]];
     if (self.profileTexts[self.profilePeer]) [self.profileAbout setString:self.profileTexts[self.profilePeer]];
@@ -3636,6 +3757,7 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)client:(JMAPIClient *)client receivedOwnInfo:(NSDictionary *)info {
     BOOL changedAvatar=info[@"buddyIcon"] && ![info[@"buddyIcon"] isEqual:self.ownInfo[@"buddyIcon"]];
     [self.ownInfo addEntriesFromDictionary:[info copy]];
+    if (info[@"moodIcon"] || ([JMString(info[@"state"]) isEqual:@"online"] && info[@"aimId"])) self.ownInfo[@"_mood"]=JMMoodCode(info[@"moodIcon"]);
     if (changedAvatar) [self.avatars refreshUIN:self.accountUIN];
     [self.ownProfileController updateOwnInfo:self.ownInfo];
     NSString *state=JMString(self.ownInfo[@"state"]);
@@ -3691,8 +3813,9 @@ static NSString *JMState(NSDictionary *contact) {
 - (void)typingExpired:(NSTimer *)timer { [self updateTypingIndicator]; }
 - (void)typingIdle:(NSTimer *)timer { [self stopOutgoingTyping]; }
 - (void)stopOutgoingTyping {
+    BOOL wasTyping=self.outgoingTypingTimer!=nil;
     [self.outgoingTypingTimer invalidate]; self.outgoingTypingTimer=nil;
-    if (self.selectedPeer) [self.client setTypingStatus:@"none" forUIN:self.selectedPeer];
+    if (wasTyping && self.selectedPeer) [self.client setTypingStatus:@"none" forUIN:self.selectedPeer];
 }
 - (void)reconnect:(id)sender {
     if (self.offlineMode) {
@@ -3730,7 +3853,7 @@ static NSString *JMState(NSDictionary *contact) {
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     if (self.dataOperationInProgress) { self.quitAfterDataOperation=YES; JMSetLabel(self.statusLabel,JML(@"Завершим копирование и закроем приложение…")); return NSTerminateLater; }
     [self flushDrafts]; [self persistRosterCache]; if (![self canLeaveDrafts]) return NSTerminateCancel;
-    self.terminating=YES; [self.scheduledBackupTimer invalidate]; self.scheduledBackupTimer=nil;
+    self.terminating=YES; [self discardAttachmentPreviews]; [self.attachmentNetwork invalidateAndCancel]; [self.scheduledBackupTimer invalidate]; self.scheduledBackupTimer=nil;
     [self.autoAwayTimer invalidate]; self.autoAwayTimer=nil; self.conversationGeneration++; [self.updateTimer invalidate]; self.updateTimer=nil; [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(automaticUpdateTick:) object:nil];
     [[NSNotificationCenter defaultCenter] removeObserver:self]; [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     [self stopOutgoingTyping]; [self.incomingTypingTimer invalidate]; [self.avatars invalidate]; [self.audioAlerts stop]; [self.notificationAlerts invalidate]; [self.client disconnect];
@@ -3744,6 +3867,7 @@ static NSString *JMState(NSDictionary *contact) {
 }
 - (void)completeTermination { [NSApp replyToApplicationShouldTerminate:YES]; }
 - (BOOL)windowShouldClose:(id)sender {
+    if (sender==self.directoryWindow) { [self closeDirectory:nil]; return NO; }
     if (sender==self.quickChatWindow) { [self closeQuickChat:nil]; return NO; }
     if (sender==self.chatWindow || sender==self.rosterWindow) [self flushDrafts];
     // Closing a chat window keeps long polling and sound alerts alive, as on Mac.

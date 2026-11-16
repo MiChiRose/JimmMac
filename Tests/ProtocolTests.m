@@ -61,6 +61,8 @@ static BOOL failOwnRead;
 @class FixtureProtocol;
 static FixtureProtocol *heldPoll;
 static NSUInteger CountRequests(NSString *suffix) { NSUInteger count=0; for (NSURLRequest *r in requests) if ([r.URL.path hasSuffix:suffix]) count++; return count; }
+static NSArray *fixtureAllowed;
+static BOOL fixtureDiscloseTyping=YES;
 static NSInteger updateFixtureStatus=200;
 static NSURLRequest *updateFixtureRequest;
 @interface UpdateFixture : NSURLProtocol
@@ -121,9 +123,21 @@ static NSURLRequest *updateFixtureRequest;
             if (mode.length) fixturePrivacyMode=mode;
             if ([Field(forms.lastObject,@"pdBlock") isEqual:@"222"]) fixtureBlocked=YES;
             else if ([Field(forms.lastObject,@"pdBlockRemove") isEqual:@"222"]) fixtureBlocked=NO;
-            else status=400;
+            else if (!mode.length) status=400;
+            NSString *allow=Field(forms.lastObject,@"pdAllow");
+            NSString *remove=Field(forms.lastObject,@"pdAllowRemove");
+            NSMutableOrderedSet *allowed=[NSMutableOrderedSet orderedSetWithArray:fixtureAllowed ?: @[@"999"]];
+            if (allow.length) [allowed addObjectsFromArray:[allow componentsSeparatedByString:@","]];
+            if (remove.length) [allowed removeObjectsInArray:[remove componentsSeparatedByString:@","]];
+            fixtureAllowed=allowed.array;
         }
-        data=@{@"pdMode":fixturePrivacyMode,@"blocks":fixtureBlocked ? @[@"222"] : @[]};
+        data=@{@"pdMode":fixturePrivacyMode,@"blocks":fixtureBlocked ? @[@"222"] : @[],@"allows":fixtureAllowed ?: @[@"999"]};
+    }
+    if ([path hasPrefix:@"/webapi/preference/"] && ([path hasSuffix:@"/get"] || [path hasSuffix:@"/set"])) {
+        NSString *value=Field(forms.lastObject,@"discloseTyping");
+        if (![self.request.HTTPMethod isEqual:@"GET"] || !value.length) status=400;
+        else if ([path hasSuffix:@"/set"]) fixtureDiscloseTyping=[value boolValue];
+        data=@{@"discloseTyping":@(fixtureDiscloseTyping)};
     }
     if ([path hasSuffix:@"/sendIM"]) { if (failSend) status = 602; else data = @{@"msgId":@"sent-1", @"timestamp":@100}; }
     if ([path hasSuffix:@"/addBuddy"]) {
@@ -143,7 +157,10 @@ static NSURLRequest *updateFixtureRequest;
         }
         else if ([path hasSuffix:@"/getProfile"]) data=@{@"screenName":@"222",@"profile":[Field(self.request.URL.query,@"sn") isEqualToString:@"111"] ? ownProfileText : @"Fixture about me"};
         else if ([path hasSuffix:@"/setProfile"]) ownProfileText=Field(self.request.URL.query,@"profile");
-        else if ([path hasSuffix:@"/setStatus"]) ownCaption=Field(self.request.URL.query,@"statusMsg");
+        else if ([path hasSuffix:@"/setStatus"]) {
+            NSString *caption=Field(self.request.URL.query,@"statusMsg");
+            if (caption) ownCaption=caption;
+        }
         else if ([path hasSuffix:@"/setState"]) data=@{@"aimId":@"111",@"state":@"away"};
     }
     if ([path hasSuffix:@"/expressions/upload"]) {
@@ -156,6 +173,8 @@ static NSURLRequest *updateFixtureRequest;
         else if ([path hasSuffix:@"/get"]) {
             NSMutableDictionary *profile=[directoryNames mutableCopy]; profile[@"aimId"]=wrongDirectory ? @"222" : @"111";
             data=@{@"infoArray":@[@{@"profile":profile}]};
+        } else if ([path hasSuffix:@"/search"]) {
+            data=@{@"results":@{@"nTotal":@40,@"infoArray":@[@{@"profile":@{@"aimId":@"222",@"firstName":@"Test"}}]}};
         } else if ([path hasSuffix:@"/update"]) {
             for (NSString *part in [self.request.URL.query componentsSeparatedByString:@"&"]) {
                 if (![part hasPrefix:@"set="]) continue;
@@ -216,6 +235,19 @@ static NSURLRequest *updateFixtureRequest;
 int main(void) {
     @autoreleasepool {
         ImprovementChecks();
+        Check([JMMoodCode(@"https://jimm.online/webapi/mood?id=000a306963716d6f6f643231") isEqual:@"0icqmood21"] &&
+            JMMoodFrame(@"0icqmood81")==15 && JMMoodFrame(@"0icqmood15")==25 && JMMoodFrame(@"0icqmood-1")==-1,
+            @"mood ID decoding uses Jimm's actual sprite frame mapping");
+        Check(!JMMoodCode(@"https://jimm.online/webapi/mood?id=00ff306963716d6f6f643231").length &&
+            !JMMoodCode(@"https://jimm.online/webapi/mood?id=000a306963716d6f6f64323z").length,
+            @"mood IDs reject malformed hex or length headers");
+        NSString *token=@"p0123456789abcdef0123456789abcdef";
+        NSString *attachmentURL=[@"https://jimm.online/f/" stringByAppendingString:token];
+        Check(JMJimmAttachmentURL([NSURL URLWithString:attachmentURL]) &&
+            !JMJimmAttachmentURL([NSURL URLWithString:[attachmentURL stringByAppendingString:@"?extra"]]) &&
+            !JMJimmAttachmentURL([NSURL URLWithString:[attachmentURL stringByAppendingString:@"/"]]) &&
+            !JMJimmAttachmentURL([NSURL URLWithString:[@"https://jimm.online.example/f/" stringByAppendingString:token]]),
+            @"inline preview accepts only the Jimm.online attachment route");
         NSString *linked=@"Сайт https://jimm.online/developers, почта test@example.com.";
         NSArray *links=JMLinksInText(linked);
         Check(links.count==2 && [[(NSTextCheckingResult *)links[0] URL].host isEqualToString:@"jimm.online"] && [[(NSTextCheckingResult *)links[1] URL].scheme isEqualToString:@"mailto"],@"native link detector supports web addresses and email");
@@ -492,6 +524,27 @@ int main(void) {
             unblocked=!e && [privacy[@"pdMode"] isEqual:@"denySome"] && ![JMBlockedUINs(privacy) containsObject:@"222"];
         }]; Pump(0.4);
         Check(unblocked,@"unblocking preserves the existing privacy mode");
+        __block BOOL searchOK=NO, moodOK=NO, groupOK=NO, privacyOK=NO, typingOK=NO;
+        [client searchDirectory:@"Test, Jr" field:@"lastName" offset:30 completion:^(NSDictionary *result,NSError *e) {
+            searchOK=!e && [result[@"results"][@"nTotal"] isEqual:@40];
+        }]; Pump(0.25);
+        Check(searchOK && [Field(forms.lastObject,@"match") isEqual:@"lastName=Test%2C Jr"] &&
+            [Field(forms.lastObject,@"nToSkip") isEqual:@"30"],@"directory search safely encodes criteria and page offset");
+        [client setMood:@"0icqmood21" completion:^(NSDictionary *result,NSError *e) { moodOK=!e; }]; Pump(0.25);
+        Check(moodOK && [Field(forms.lastObject,@"mood") isEqual:@"0icqmood21"] && !Field(forms.lastObject,@"statusMsg"),@"mood mutation leaves status text untouched");
+        [client setMood:@"" completion:^(NSDictionary *result,NSError *e) { moodOK=!e; }]; Pump(0.25);
+        Check(moodOK && [Field(forms.lastObject,@"mood") isEqual:@""],@"an explicit empty mood clears the earlier X-status");
+        [client setGroup:@"Friends" collapsed:YES completion:^(NSDictionary *result,NSError *e) { groupOK=!e; }]; Pump(0.25);
+        Check(groupOK && [Field(forms.lastObject,@"collapsed") isEqual:@"true"],@"real group collapse sends the documented value");
+        [client updatePrivacyMode:@"permitSome" allow:@[@"333",@"444"] remove:@[@"999"] completion:^(NSDictionary *result,NSError *e) {
+            privacyOK=!e && [result[@"pdMode"] isEqual:@"permitSome"] && [JMAllowedUINs(result) isEqual:@[@"333",@"444"]];
+        }]; Pump(0.4);
+        Check(privacyOK && [[(NSURLRequest *)requests.lastObject URL].path hasSuffix:@"/getPermitDeny"],@"privacy changes use an independent permit list read");
+        [client setDiscloseTyping:NO completion:^(NSDictionary *result,NSError *e) {
+            typingOK=!e && [result[@"discloseTyping"] isEqual:@NO];
+        }]; Pump(0.4);
+        Check(typingOK && [[(NSURLRequest *)requests.lastObject URL].path hasSuffix:@"/preference/get"],@"typing disclosure change is read back from account preferences");
+
         __block NSArray *storedRows=nil;
         [client fetchStoredMessagesForPeer:@"222" completion:^(NSDictionary *data,NSError *e) { if (!e) storedRows=data[@"msgs"]; }]; Pump(0.35);
         NSDictionary *recovered=JMMessageFromStoredIM(storedRows.firstObject,@"222",@"111");

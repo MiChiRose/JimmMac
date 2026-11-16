@@ -24,13 +24,15 @@ fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 build_slice() {
     local arch="$1" minimum="$2" binary="$3"
+    bash "$PROJECT_ROOT/scripts/build-webp.sh" "$binary-webp.a" -arch "$arch" "-mmacosx-version-min=$minimum" -isysroot "$SDK_PATH"
     xcrun --sdk macosx clang -arch "$arch" "-mmacosx-version-min=$minimum" -isysroot "$SDK_PATH" \
-    -fobjc-arc -fblocks -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations \
+    -I"$PROJECT_ROOT/Vendor/libwebp" -fobjc-arc -fblocks -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations \
     -framework Cocoa -framework Carbon -framework ImageIO -framework Security -lsqlite3 \
-    "$PROJECT_ROOT/Sources/main.m" "$PROJECT_ROOT/Sources/JMAppDelegate.m" "$PROJECT_ROOT/Sources/JMKeyboard.m" "$PROJECT_ROOT/Sources/JMInformationController.m" "$PROJECT_ROOT/Sources/JMUpdateChecker.m" "$PROJECT_ROOT/Sources/JMEmoticons.m" \
+    "$PROJECT_ROOT/Sources/JMWebP.m" "$PROJECT_ROOT/Sources/main.m" "$PROJECT_ROOT/Sources/JMAppDelegate.m" "$PROJECT_ROOT/Sources/JMKeyboard.m" "$PROJECT_ROOT/Sources/JMInformationController.m" "$PROJECT_ROOT/Sources/JMUpdateChecker.m" "$PROJECT_ROOT/Sources/JMEmoticons.m" \
     "$PROJECT_ROOT/Sources/JMAutoAway.m" "$PROJECT_ROOT/Sources/JMDiagnostics.m" "$PROJECT_ROOT/Sources/JMAPIClient.m" "$PROJECT_ROOT/Sources/JMHTTPClient.m" "$PROJECT_ROOT/Sources/JMGitHubTrust.m" "$PROJECT_ROOT/Sources/JMProtocol.m" \
     "$PROJECT_ROOT/Sources/JMHistory.m" "$PROJECT_ROOT/Sources/JMAccountData.m" "$PROJECT_ROOT/Sources/JMLocalization.m" "$PROJECT_ROOT/Sources/JMDraftStore.m" "$PROJECT_ROOT/Sources/JMLoginStore.m" "$PROJECT_ROOT/Sources/JMStyle.m" "$PROJECT_ROOT/Sources/JMTheme.m" "$PROJECT_ROOT/Sources/JMAvatarStore.m" "$PROJECT_ROOT/Sources/JMAudioAlerts.m" \
-    "$PROJECT_ROOT/Sources/JMTextTools.m" "$PROJECT_ROOT/Sources/JMChatPreferences.m" "$PROJECT_ROOT/Sources/JMNotificationAlerts.m" "$PROJECT_ROOT/Sources/JMOwnProfileController.m" -o "$binary"
+    "$PROJECT_ROOT/Sources/JMTextTools.m" "$PROJECT_ROOT/Sources/JMChatPreferences.m" "$PROJECT_ROOT/Sources/JMNotificationAlerts.m" "$PROJECT_ROOT/Sources/JMOwnProfileController.m" "$binary-webp.a" -o "$binary"
+    rm "$binary-webp.a"
 }
 if [[ "$PROFILE" == modern ]]; then
     SLICES="$(mktemp -d "${TMPDIR:-/tmp}/jimmmac-slices.XXXXXX")"
@@ -50,6 +52,8 @@ cp "$PROJECT_ROOT/Resources/SectigoPublicServerAuthenticationRootE46.der" "$PROJ
 cp "$PROJECT_ROOT/Resources/JimmStatusSprite.png" "$APP/Contents/Resources/"
 mkdir -p "$APP/Contents/Resources/Sounds"
 ditto "$PROJECT_ROOT/Resources/Retro" "$APP/Contents/Resources/Retro"
+cp "$PROJECT_ROOT/Vendor/libwebp/COPYING" "$APP/Contents/Resources/Retro/COPYING-libwebp.txt"
+cp "$PROJECT_ROOT/Vendor/libwebp/PATENTS" "$APP/Contents/Resources/Retro/PATENTS-libwebp.txt"
 cp "$PROJECT_ROOT/Resources/ASSET-SOURCES.md" "$APP/Contents/Resources/Retro/SOURCES.md"
 cp "$PROJECT_ROOT/Resources/Sounds/"*.mp3 "$APP/Contents/Resources/Sounds/"
 if [[ "$PROFILE" == modern ]]; then

@@ -15,3 +15,7 @@ NSDictionary *JMMessageFromEvent(NSDictionary *event, NSString *ownUIN);
 
 NSDictionary *JMMessageFromStoredIM(NSDictionary *row, NSString *peer, NSString *ownUIN);
 NSArray *JMBlockedUINs(NSDictionary *privacy);
+NSArray *JMAllowedUINs(NSDictionary *privacy);
+NSString *JMMoodCode(id icon);
+NSInteger JMMoodFrame(NSString *code);
+BOOL JMJimmAttachmentURL(NSURL *url);

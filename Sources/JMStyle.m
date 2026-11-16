@@ -154,6 +154,7 @@ NSColor *JMSelectionColor(BOOL emphasized) {
 @property(nonatomic, strong) NSTextField *timestampLabel;
 @property(nonatomic, strong) JMUnreadBadge *badge;
 @property(nonatomic, strong) NSImageView *presenceImage;
+@property(nonatomic, strong) NSImageView *moodImage;
 @property(nonatomic) BOOL draft;
 @property(nonatomic) NSInteger unread;
 @end
@@ -162,6 +163,7 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     self=[super initWithFrame:frame]; if (!self) return nil;
     NSImageView *avatar=[[JMClassicAvatarView alloc] initWithFrame:NSZeroRect]; avatar.imageScaling=NSImageScaleProportionallyUpOrDown; [self addSubview:avatar]; self.imageView=avatar;
     self.presenceImage=[[NSImageView alloc] initWithFrame:NSZeroRect]; self.presenceImage.imageScaling=NSImageScaleProportionallyUpOrDown; [self addSubview:self.presenceImage];
+    self.moodImage=[[NSImageView alloc] initWithFrame:NSZeroRect]; [self addSubview:self.moodImage];
     NSTextField *name=[[NSTextField alloc] initWithFrame:NSZeroRect]; [self addSubview:name]; self.textField=name;
     self.detailLabel=[[NSTextField alloc] initWithFrame:NSZeroRect]; self.timestampLabel=[[NSTextField alloc] initWithFrame:NSZeroRect];
     for (NSTextField *label in @[self.textField,self.detailLabel,self.timestampLabel]) {
@@ -178,32 +180,36 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     CGFloat width=NSWidth(self.bounds), height=NSHeight(self.bounds)-[self groupHeaderHeight];
     BOOL person=[self.identifier isEqual:@"person"], compact=JMTheme()==JMThemePro2003 && person, mac=JMTheme()==JMThemeMac2011 && person;
     self.imageView.hidden=compact; self.detailLabel.hidden=compact || (mac && (!self.detailLabel.stringValue.length || height<32));
+    CGFloat moodSpace=self.moodImage.image ? 21 : 0;
+    self.moodImage.hidden=!moodSpace;
+    CGFloat nameX=JMThemeIsMobile() && person ? 34 : (compact ? 25 : (mac ? 29 : 56));
+    self.moodImage.frame=NSMakeRect(nameX,floor((height-16)/2),16,16);
     CGFloat badgeWidth=self.badge.text.length ? MAX(18,[self.badge.text sizeWithAttributes:@{NSFontAttributeName:[NSFont boldSystemFontOfSize:10]}].width+10) : 0;
     if (JMThemeIsMobile() && person) {
         self.presenceImage.frame=NSMakeRect(8,floor((height-20)/2),20,20);
         self.imageView.hidden=YES;
-        self.textField.frame=NSMakeRect(34,height-22,MAX(0,width-42-(badgeWidth ? badgeWidth+5 : 0)),18);
-        self.detailLabel.frame=NSMakeRect(34,1,MAX(0,width-42-(badgeWidth ? badgeWidth+5 : 0)),14);
+        self.textField.frame=NSMakeRect(34+moodSpace,height-22,MAX(0,width-42-moodSpace-(badgeWidth ? badgeWidth+5 : 0)),18);
+        self.detailLabel.frame=NSMakeRect(34+moodSpace,1,MAX(0,width-42-moodSpace-(badgeWidth ? badgeWidth+5 : 0)),14);
         self.timestampLabel.hidden=YES; self.badge.frame=NSMakeRect(width-6-badgeWidth,floor((height-18)/2),badgeWidth,18);
         self.badge.hidden=badgeWidth==0; return;
     }
     if (compact) {
         self.presenceImage.frame=NSMakeRect(5,floor((height-16)/2),16,16);
-        self.textField.frame=NSMakeRect(25,floor((height-17)/2),MAX(0,width-31-(badgeWidth ? badgeWidth+5 : 0)),17);
+        self.textField.frame=NSMakeRect(25+moodSpace,floor((height-17)/2),MAX(0,width-31-moodSpace-(badgeWidth ? badgeWidth+5 : 0)),17);
         self.badge.frame=NSMakeRect(width-5-badgeWidth,floor((height-18)/2),badgeWidth,18); self.badge.hidden=badgeWidth==0;
         self.timestampLabel.hidden=YES; return;
     }
     if (mac) {
         self.presenceImage.frame=NSMakeRect(7,floor((height-16)/2),16,16); self.imageView.frame=NSMakeRect(width-37,floor((height-28)/2),28,28);
-        self.textField.frame=NSMakeRect(29,self.detailLabel.isHidden ? floor((height-18)/2) : height-23,MAX(0,width-73-(badgeWidth ? badgeWidth+5 : 0)),18);
-        self.detailLabel.frame=NSMakeRect(29,2,MAX(0,width-73),15);
+        self.textField.frame=NSMakeRect(29+moodSpace,self.detailLabel.isHidden ? floor((height-18)/2) : height-23,MAX(0,width-73-moodSpace-(badgeWidth ? badgeWidth+5 : 0)),18);
+        self.detailLabel.frame=NSMakeRect(29+moodSpace,2,MAX(0,width-73-moodSpace),15);
         self.timestampLabel.hidden=YES; self.badge.frame=NSMakeRect(width-42-badgeWidth,height-19,badgeWidth,18); self.badge.hidden=badgeWidth==0; return;
     }
     CGFloat stampWidth=self.timestampLabel.stringValue.length ? MAX(34,ceil([[self.timestampLabel cell] cellSize].width)+2) : 0;
     self.imageView.frame=NSMakeRect(10,floor((height-36)/2),36,36); self.presenceImage.frame=NSMakeRect(35,floor((height-36)/2)-3,16,16);
     self.timestampLabel.frame=NSMakeRect(width-12-stampWidth,height-25,stampWidth,17); self.timestampLabel.hidden=stampWidth==0;
-    self.textField.frame=NSMakeRect(56,height<50 ? height-22 : height-27,MAX(0,width-68-(stampWidth ? stampWidth+8 : 0)),21);
-    self.detailLabel.frame=NSMakeRect(56,height<50 ? 2 : 10,MAX(0,width-68-(badgeWidth ? badgeWidth+8 : 0)),17);
+    self.textField.frame=NSMakeRect(56+moodSpace,height<50 ? height-22 : height-27,MAX(0,width-68-moodSpace-(stampWidth ? stampWidth+8 : 0)),21);
+    self.detailLabel.frame=NSMakeRect(56+moodSpace,height<50 ? 2 : 10,MAX(0,width-68-moodSpace-(badgeWidth ? badgeWidth+8 : 0)),17);
     self.badge.frame=NSMakeRect(width-12-badgeWidth,height<50 ? 2 : 10,badgeWidth,18); self.badge.hidden=badgeWidth==0;
 }
 - (CGFloat)groupHeaderHeight { return self.groupTitle.length && [self.identifier isEqual:@"person"] ? (JMTheme()==JMThemePro2003 ? 17 : 23) : 0; }
@@ -248,6 +254,11 @@ NSColor *JMSelectionColor(BOOL emphasized) {
     self.timestampLabel.stringValue=timestamp ?: @""; self.timestampLabel.toolTip=nil; self.draft=draft; [self layoutContents]; [self setBackgroundStyle:self.backgroundStyle];
 }
 - (void)setTimestampTooltip:(NSString *)tooltip { self.timestampLabel.toolTip=tooltip; }
+- (void)setMoodImage:(NSImage *)image title:(NSString *)title {
+    self.moodImage.image=image;
+    self.moodImage.toolTip=title;
+    [self layoutContents];
+}
 - (void)setAvatar:(NSImage *)image { self.imageView.image=image ?: (JMTheme()==JMThemeMac2011 ? JMRetroImage(@"avatar") : nil) ?: [NSImage imageNamed:NSImageNameUser]; }
 - (void)setBackgroundStyle:(NSBackgroundStyle)style {
     [super setBackgroundStyle:style]; BOOL selected=style==NSBackgroundStyleDark;

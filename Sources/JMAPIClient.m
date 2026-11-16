@@ -137,7 +137,7 @@
 - (void)startSession {
     NSUInteger attempt = ++self.sessionSerial;
     [self status:JML(@"Подключаемся к Jimm.online…") connected:NO];
-    [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,sessionEnded,rateLimit",
+    [self call:@"/aim/startSession" parameters:@{@"a":self.token, @"events":@"buddylist,presence,im,offlineIM,sentIM,typing,myInfo,preference,sessionEnded,rateLimit",
                                               @"clientName":@"JimmMac Legacy",
                                               @"clientVersion":[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0.17.0",
                                               @"timeout":@"60"}
@@ -210,6 +210,8 @@
             if ([type isEqualToString:@"buddylist"]) [self.delegate client:self receivedBuddyList:payload];
             else if ([type isEqualToString:@"presence"]) [self.delegate client:self receivedPresence:payload];
             else if ([type isEqualToString:@"typing"] && [self.delegate respondsToSelector:@selector(client:receivedTyping:)]) [self.delegate client:self receivedTyping:payload];
+            else if ([type isEqualToString:@"preference"] && [self.delegate respondsToSelector:@selector(client:receivedAccountPreferences:)])
+                [self.delegate client:self receivedAccountPreferences:payload];
             else if ([type isEqualToString:@"myInfo"]) {
                 NSString *state=JMString(payload[@"state"]);
                 if ([@[@"online",@"away",@"dnd",@"occupied",@"invisible"] containsObject:state]) self.preferredPresence=state;
@@ -314,9 +316,52 @@
         completion(data,error);
     }];
 }
+- (void)searchDirectory:(NSString *)value field:(NSString *)field offset:(NSUInteger)offset completion:(void (^)(NSDictionary *, NSError *))completion {
+    if (![@[@"keyword",@"firstName",@"lastName"] containsObject:field] || !value.length || value.length>100 ||
+        [value rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location!=NSNotFound) {
+        [self invalidRosterInput:completion]; return;
+    }
+    // The API splits on commas before unescaping the values. JMRequest then encodes the form.
+    NSString *escaped=[value stringByReplacingOccurrencesOfString:@"%" withString:@"%25"];
+    escaped=[escaped stringByReplacingOccurrencesOfString:@"," withString:@"%2C"];
+    NSString *match=[NSString stringWithFormat:@"%@=%@",field,escaped];
+    [self sessionQuery:@"/memberDir/search" parameters:@{@"match":match,@"nToGet":@30,@"nToSkip":@(offset)} completion:completion];
+}
+- (void)setMood:(NSString *)mood completion:(void (^)(NSDictionary *, NSError *))completion {
+    if (![mood isKindOfClass:[NSString class]] || (mood.length && JMMoodFrame(mood)<0)) {
+        [self invalidRosterInput:completion]; return;
+    }
+    [self sessionQuery:@"/presence/setStatus" parameters:@{@"mood":mood} completion:completion];
+}
+- (void)fetchAccountPreferences:(void (^)(NSDictionary *, NSError *))completion {
+    [self sessionQuery:@"/preference/get" parameters:@{@"discloseTyping":@"1"} completion:completion];
+}
+- (void)setDiscloseTyping:(BOOL)enabled completion:(void (^)(NSDictionary *, NSError *))completion {
+    [self sessionQuery:@"/preference/set" parameters:@{@"discloseTyping":enabled ? @"1" : @"0"} completion:^(NSDictionary *data, NSError *error) {
+        if (error) { completion(nil,error); return; }
+        [self fetchAccountPreferences:completion];
+    }];
+}
+- (void)updatePrivacyMode:(NSString *)mode allow:(NSArray *)added remove:(NSArray *)removed completion:(void (^)(NSDictionary *, NSError *))completion {
+    if (![@[@"permitAll",@"denySome",@"permitOnList",@"permitSome",@"denyAll"] containsObject:mode]) { [self invalidRosterInput:completion]; return; }
+    for (NSString *uin in [added arrayByAddingObjectsFromArray:removed]) {
+        if (!JMValidUIN(uin) || [uin isEqual:self.uin]) { [self invalidRosterInput:completion]; return; }
+    }
+    NSMutableDictionary *form=[@{@"pdMode":mode} mutableCopy];
+    if (added.count) form[@"pdAllow"]=[added componentsJoinedByString:@","];
+    if (removed.count) form[@"pdAllowRemove"]=[removed componentsJoinedByString:@","];
+    [self sessionQuery:@"/preference/setPermitDeny" parameters:form completion:^(NSDictionary *data, NSError *error) {
+        if (error) { completion(nil,error); return; }
+        [self fetchPrivacy:completion];
+    }];
+}
+- (void)setGroup:(NSString *)group collapsed:(BOOL)collapsed completion:(void (^)(NSDictionary *, NSError *))completion {
+    if (!JMValidRosterName(group,NO)) { [self invalidRosterInput:completion]; return; }
+    [self rosterCall:@"/buddylist/setGroupAttribute" parameters:@{@"group":group,@"collapsed":collapsed ? @"true" : @"false"} completion:completion];
+}
 - (void)fetchPrivacy:(void (^)(NSDictionary *, NSError *))completion {
     [self sessionQuery:@"/preference/getPermitDeny" parameters:@{} completion:^(NSDictionary *data, NSError *error) {
-        if (!error && (![@[@"permitAll",@"denySome",@"permitSome",@"permitOnList",@"denyAll"] containsObject:JMString(data[@"pdMode"])] || !JMBlockedUINs(data))) {
+        if (!error && (![@[@"permitAll",@"denySome",@"permitSome",@"permitOnList",@"denyAll"] containsObject:JMString(data[@"pdMode"])] || !JMBlockedUINs(data) || !JMAllowedUINs(data))) {
             error=[NSError errorWithDomain:JMAPIErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey:JML(@"Сервер вернул неизвестные настройки приватности.")}];
         }
         completion(error ? nil : data,error);

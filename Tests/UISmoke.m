@@ -17,6 +17,7 @@
 #import "JMEmoticons.h"
 #import "JMUpdateChecker.h"
 #import "JMAccountData.h"
+#import "JMWebP.h"
 #import "JMTheme.h"
 #import "JMAutoAway.h"
 #import "JMLocalization.h"
@@ -31,6 +32,9 @@
 #include <sys/utsname.h>
 
 @interface JMAppDelegate (SmokeAccess)
+- (void)showDirectory:(id)sender;
+- (void)searchDirectory:(id)sender;
+- (void)writeDirectoryContact:(id)sender;
 - (void)toggleGroup:(NSString *)group;
 - (void)toggleUnreadFilter:(id)sender;
 - (void)restoreRecentMessages:(id)sender;
@@ -333,6 +337,13 @@ static NSURL *testDraftRoot;
 @property(nonatomic, copy) NSString *loginUIN;
 @end
 @implementation UIClient
+- (void)searchDirectory:(NSString *)value field:(NSString *)field offset:(NSUInteger)offset completion:(void (^)(NSDictionary *,NSError *))completion {
+    completion(@{@"results":@{@"nTotal":@1,@"infoArray":@[@{@"profile":@{@"aimId":@"666777",@"firstName":@"Тест",@"lastName":value}}]}},nil);
+}
+- (void)fetchAccountPreferences:(void (^)(NSDictionary *,NSError *))completion { completion(@{@"discloseTyping":@YES},nil); }
+- (void)setGroup:(NSString *)group collapsed:(BOOL)collapsed completion:(void (^)(NSDictionary *,NSError *))completion {
+    [self rosterReply:collapsed ? @"collapseGroup" : @"expandGroup" completion:completion];
+}
 - (void)fetchStoredMessagesForPeer:(NSString *)peer completion:(void (^)(NSDictionary *,NSError *))completion { completion(@{@"msgs":self.storedRows ?: @[]},nil); }
 - (void)reconnect { self.reconnects++; }
 - (id)init { self=[super init]; if (self) { self.rosterCalls=[NSMutableArray array]; self.ownCalls=[NSMutableArray array]; self.ownNames=[@{@"firstName":@"Иван",@"lastName":@"Тестовый"} mutableCopy]; self.ownAbout=@"Люблю старые Mac и простые мессенджеры."; self.ownCaption=@"На связи со старого Mac"; } return self; }
@@ -557,7 +568,7 @@ int main(int argc, const char *argv[]) {
         [delegate client:client changedStatus:@"В сети · тестовые данные" connected:YES];
         if (getenv("JIMMMAC_IMPROVEMENTS_ONLY")) {
             [delegate setValue:@"111" forKey:@"accountUIN"]; [delegate setValue:[[FixtureAvatarStore alloc] init] forKey:@"avatars"];
-            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); ConversationNavigationUI(delegate,output);
+            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); ConversationNavigationUI(delegate,output); DirectoryMediaUI(delegate,output);
             [[NSFileManager defaultManager] removeItemAtURL:root error:NULL]; printf("PASS: %lu focused improvement UI checks\n",(unsigned long)uiChecks); return 0;
         }
         {
@@ -1511,7 +1522,7 @@ int main(int argc, const char *argv[]) {
             JMSetLanguage(@"ru"); [testAlertDefaults setObject:@"ru" forKey:@"InterfaceLanguage"]; [app setDelegate:delegate];
             [app setMainMenu:primaryMenu];
 
-            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); ConversationNavigationUI(delegate,output);
+            ImprovementUI(delegate,output); RetroUpgradeUI(delegate,output); ConversationNavigationUI(delegate,output); DirectoryMediaUI(delegate,output);
             [delegate selectPeer:@"777"]; [chat setContentSize:NSMakeSize(860,560)];
             emptyView=[delegate valueForKey:@"conversationEmptyView"]; emptyFits=YES;
             for (NSView *view in emptyView.subviews) if (!view.hidden && !NSContainsRect(emptyView.bounds,view.frame)) emptyFits=NO;

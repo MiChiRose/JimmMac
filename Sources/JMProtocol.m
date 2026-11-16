@@ -42,7 +42,7 @@ NSMutableURLRequest *JMRequest(NSURL *baseURL, NSString *path, NSDictionary *par
     NSMutableDictionary *form = [parameters mutableCopy];
     form[@"f"] = @"json";
     // Keep the explicit GET-only contract. Login and message bodies use POST.
-    BOOL getOnly = [@[@"/auth/getInfo", @"/aim/fetchEvents", @"/aim/endSession", @"/buddylist/addBuddy", @"/buddylist/removeBuddy", @"/buddylist/moveBuddy", @"/buddylist/setBuddyAttribute", @"/buddylist/addGroup", @"/buddylist/renameGroup", @"/buddylist/removeGroup", @"/presence/get", @"/presence/getProfile", @"/presence/setProfile", @"/presence/setStatus", @"/memberDir/get", @"/memberDir/update", @"/presence/setState", @"/im/setTyping", @"/imlog/fetchStoredIMs", @"/preference/getPermitDeny", @"/preference/setPermitDeny"] containsObject:path];
+    BOOL getOnly = [@[@"/auth/getInfo", @"/aim/fetchEvents", @"/aim/endSession", @"/buddylist/addBuddy", @"/buddylist/removeBuddy", @"/buddylist/moveBuddy", @"/buddylist/setBuddyAttribute", @"/buddylist/addGroup", @"/buddylist/renameGroup", @"/buddylist/removeGroup", @"/presence/get", @"/presence/getProfile", @"/presence/setProfile", @"/presence/setStatus", @"/memberDir/get", @"/memberDir/search", @"/preference/get", @"/preference/set", @"/buddylist/setGroupAttribute", @"/memberDir/update", @"/presence/setState", @"/im/setTyping", @"/imlog/fetchStoredIMs", @"/preference/getPermitDeny", @"/preference/setPermitDeny"] containsObject:path];
     if (getOnly) url = [url stringByAppendingFormat:@"?%@", JMFormEncode(form)];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]
                                                          cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
@@ -146,9 +146,7 @@ NSDictionary *JMMessageFromStoredIM(NSDictionary *row, NSString *peer, NSString 
              @"outgoing":@([sender isEqualToString:ownUIN]), @"name":@""};
 }
 
-NSArray *JMBlockedUINs(NSDictionary *privacy) {
-    id raw=privacy[@"blocks"];
-    if (!raw) raw=privacy[@"denies"];
+static NSArray *JMPrivacyUINs(id raw) {
     if (raw && ![raw isKindOfClass:[NSArray class]]) return nil;
     NSMutableOrderedSet *result=[NSMutableOrderedSet orderedSet];
     for (id entry in JMArray(raw)) {
@@ -157,4 +155,70 @@ NSArray *JMBlockedUINs(NSDictionary *privacy) {
         [result addObject:uin];
     }
     return result.array;
+}
+
+NSArray *JMBlockedUINs(NSDictionary *privacy) {
+    return JMPrivacyUINs(privacy[@"blocks"] ?: privacy[@"denies"]);
+}
+
+NSArray *JMAllowedUINs(NSDictionary *privacy) {
+    return JMPrivacyUINs(privacy[@"allows"]);
+}
+
+NSString *JMMoodCode(id icon) {
+    NSString *link=JMString(icon);
+    for (NSString *pair in [[[NSURL URLWithString:link] query] componentsSeparatedByString:@"&"]) {
+        if (![pair hasPrefix:@"id="]) continue;
+        NSString *hex=[pair substringFromIndex:3];
+        if (hex.length<4 || hex.length>36 || hex.length%2) return @"";
+        NSMutableData *bytes=[NSMutableData data];
+        for (NSUInteger i=0; i<hex.length; i+=2) {
+            unsigned int value;
+            NSString *pair=[hex substringWithRange:NSMakeRange(i,2)];
+            NSScanner *scanner=[NSScanner scannerWithString:pair];
+            scanner.charactersToBeSkipped=nil;
+            if (![scanner scanHexInt:&value] || !scanner.isAtEnd) return @"";
+            unsigned char byte=(unsigned char)value;
+            [bytes appendBytes:&byte length:1];
+        }
+        const unsigned char *prefix=bytes.bytes;
+        if (256*prefix[0]+prefix[1]!=bytes.length-2) return @"";
+        NSString *code=[[NSString alloc] initWithData:[bytes subdataWithRange:NSMakeRange(2,bytes.length-2)] encoding:NSASCIIStringEncoding];
+        return JMMoodFrame(code)>=0 ? code : @"";
+    }
+    return @"";
+}
+
+NSInteger JMMoodFrame(NSString *code) {
+    if (![code hasPrefix:@"0icqmood"]) return -1;
+    NSString *value=[code substringFromIndex:8];
+    if (!value.length || value.length>2) return -1;
+    NSInteger number=value.integerValue;
+    if (![value isEqual:[NSString stringWithFormat:@"%ld",(long)number]]) return -1;
+    if (number>=0 && number<=23 && number!=15) return number;
+    switch (number) {
+        case 81: return 15;
+        case 66: return 24;
+        case 15: return 25;
+        case 71: return 26;
+        case 70: return 27;
+        case 68: return 28;
+        case 77: return 29;
+        case 83: return 30;
+        case 61: case 76: return 31;
+        case 85: return 34;
+        case 84: return 35;
+        default: return -1;
+    }
+}
+
+BOOL JMJimmAttachmentURL(NSURL *url) {
+    if (![url.scheme.lowercaseString isEqual:@"https"] || ![url.host.lowercaseString isEqual:@"jimm.online"] ||
+        (url.port && url.port.integerValue!=443) || url.user || url.password || url.query || url.fragment) return NO;
+    NSArray *parts=url.pathComponents;
+    if (parts.count!=3 || ![parts[1] isEqual:@"f"]) return NO;
+    NSString *identifier=parts[2];
+    NSString *token=[identifier hasPrefix:@"p"] ? [identifier substringFromIndex:1] : identifier;
+    return token.length==32 && [token rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet]].location==NSNotFound &&
+        [url.absoluteString hasSuffix:[@"/f/" stringByAppendingString:identifier]];
 }
